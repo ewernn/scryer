@@ -69,10 +69,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    from scryer.server.middleware import ApiVersionHeadersMiddleware
+    from scryer.server.middleware import (
+        ApiVersionHeadersMiddleware,
+        BodySizeLimitMiddleware,
+    )
 
+    # Order matters: add_middleware wraps in reverse, so the LAST added is the
+    # OUTERMOST. BodySizeLimitMiddleware runs first to reject oversize bodies
+    # before any other middleware touches the request.
     app.add_middleware(ApiVersionHeadersMiddleware)
     app.add_middleware(CorrelationIdMiddleware, header_name="X-Request-ID")
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_exception_handler(ScryerError, scryer_error_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
 
