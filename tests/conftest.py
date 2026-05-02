@@ -125,9 +125,7 @@ async def http_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
-async def client(
-    engine: AsyncEngine, http_session: AsyncSession
-) -> AsyncIterator[AsyncClient]:
+async def client(engine: AsyncEngine, http_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """ASGI test client. Each request gets its own session against the test
     engine; commits go to the schema-isolated test namespace and are wiped
     at session end."""

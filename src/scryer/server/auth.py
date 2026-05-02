@@ -16,14 +16,14 @@ from dataclasses import dataclass
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.db import get_session
 from scryer.server.models.enums import ApiScope, PrincipalKind
 from scryer.server.services.api_keys import resolve_api_key
-from scryer.server.services.errors import AuthError
+from scryer.server.services.errors import AuthError, PermissionError
 from scryer.server.services.security import verify_access_jwt
 
 _bearer = HTTPBearer(auto_error=False)
@@ -34,7 +34,7 @@ class Principal:
     id: uuid.UUID
     kind: PrincipalKind
     scopes: frozenset[ApiScope]
-    api_key_id: uuid.UUID | None = None  # set when authenticated via ApiKey
+    api_key_id: uuid.UUID | None = None
 
 
 async def get_principal(
@@ -42,21 +42,17 @@ async def get_principal(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Principal:
     if creds is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing credentials")
+        raise AuthError("Missing credentials")
     token = creds.credentials
-
     if token.startswith("scrk_live_"):
         return await _principal_from_api_key(token, session)
     if "." in token:
         return _principal_from_jwt(token)
-    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Unrecognized credential format")
+    raise AuthError("Unrecognized credential format")
 
 
 async def _principal_from_api_key(token: str, session: AsyncSession) -> Principal:
-    try:
-        row = await resolve_api_key(session, token)
-    except AuthError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    row = await resolve_api_key(session, token)  # raises AuthError on failure
     pid = (
         row.principal_user_id
         if row.principal_kind == PrincipalKind.user
@@ -64,10 +60,7 @@ async def _principal_from_api_key(token: str, session: AsyncSession) -> Principa
     )
     assert pid is not None  # CHECK constraint guarantees this
     return Principal(
-        id=pid,
-        kind=row.principal_kind,
-        scopes=frozenset(row.scopes),
-        api_key_id=row.id,
+        id=pid, kind=row.principal_kind, scopes=frozenset(row.scopes), api_key_id=row.id
     )
 
 
@@ -75,13 +68,16 @@ def _principal_from_jwt(token: str) -> Principal:
     try:
         claims = verify_access_jwt(token)
     except jwt.PyJWTError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+        raise AuthError(str(exc)) from exc
     sub = claims.get("sub")
     if not sub:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "JWT missing sub")
-    # JWT-authenticated principals are always Users with full scope
+        raise AuthError("JWT missing sub claim")
+    try:
+        sub_uuid = uuid.UUID(sub)
+    except ValueError as exc:
+        raise AuthError("JWT sub is not a valid UUID") from exc
     return Principal(
-        id=uuid.UUID(sub),
+        id=sub_uuid,
         kind=PrincipalKind.user,
         scopes=frozenset({ApiScope.read, ApiScope.write, ApiScope.admin}),
     )
@@ -92,7 +88,7 @@ def require_scope(scope: ApiScope) -> Callable[[Principal], Awaitable[Principal]
         principal: Annotated[Principal, Depends(get_principal)],
     ) -> Principal:
         if scope not in principal.scopes:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, f"Scope required: {scope.value}")
+            raise PermissionError(f"Scope required: {scope.value}")
         return principal
 
     return _dep

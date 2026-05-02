@@ -25,7 +25,6 @@ async def issue_api_key(
     scopes: list[ApiScope],
     name: str | None = None,
     expires_at: datetime | None = None,
-    allowed_ips: list[str] | None = None,
 ) -> tuple[ApiKey, str]:
     """Returns (db row, full_key shown once). full_key never persisted."""
     if principal_kind == PrincipalKind.service_account and ApiScope.admin in scopes:
@@ -43,7 +42,6 @@ async def issue_api_key(
         name=name,
         scopes=scopes,
         expires_at=expires_at,
-        allowed_ips=allowed_ips,
     )
     session.add(row)
     await session.flush()

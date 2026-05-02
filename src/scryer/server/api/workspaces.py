@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
+from scryer.server.services.access import assert_workspace_member
 from scryer.server.services.workspaces import (
     get_workspace_by_slug,
     list_workspaces_for_user,
@@ -50,8 +51,9 @@ async def list_(
 )
 async def get_(
     slug: str,
-    principal: Annotated[Principal, Depends(get_principal)],  # noqa: ARG001
+    principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WorkspaceOut:
     ws = await get_workspace_by_slug(session, slug)
+    await assert_workspace_member(session, principal, ws.id)
     return WorkspaceOut(id=str(ws.id), slug=ws.slug, name=ws.name, created_at=ws.created_at)

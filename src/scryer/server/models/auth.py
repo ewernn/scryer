@@ -346,7 +346,7 @@ class ApiKey(Base, TimestampMixin):
         default=list,
         server_default=text("'{}'"),
     )
-    allowed_ips: Mapped[list[str] | None] = mapped_column(ARRAY(INET), nullable=True)
+    # allowed_ips removed v0 (deferred enforcement; CONVENTIONS: no fake support)
 
     # Lifecycle
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

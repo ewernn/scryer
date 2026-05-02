@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.models.enums import ProjectVisibility
+from scryer.server.services.access import assert_workspace_member
 from scryer.server.services.projects import list_projects_for_user_in_workspace
 from scryer.server.services.workspaces import get_workspace_by_slug
 
@@ -38,6 +39,7 @@ async def list_(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[ProjectOut]:
     ws = await get_workspace_by_slug(session, workspace_slug)
+    await assert_workspace_member(session, principal, ws.id)
     rows = await list_projects_for_user_in_workspace(
         session, workspace_id=ws.id, user_id=principal.id
     )

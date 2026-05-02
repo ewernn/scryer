@@ -175,6 +175,23 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 1.10 (final critic + 3 critical fixes) — DONE [2026-05-02 ~05:00 UTC]
+
+- **Critical: cross-tenant leak in GET /workspaces/{slug}** fixed via new
+  `services/access.py` module with `assert_workspace_member`,
+  `assert_project_access`, `get_project_by_slug_path` (latter two for Phase 2)
+- **Critical: cross-tenant leak in GET /workspaces/{slug}/projects** fixed
+  by calling `assert_workspace_member` before resolution
+- **Critical: RFC 9457 violation in auth.py** fixed — all `HTTPException`
+  replaced with typed `AuthError`/`PermissionError`. JWT `uuid.UUID(sub)`
+  ValueError now caught → 401, not 500
+- `allowed_ips` removed from ApiKey (CONVENTIONS: no fake support);
+  migration applied
+- 9 new security tests: cross-tenant 404, malformed-bearer parametrized,
+  non-UUID JWT sub returns 401 not 500
+- TOTAL TESTS: 62 passing
+- Critic identified Phase 2 prep gaps; access.py module addresses 3 of 4
+
 ## Phase 1.9 (CLI + workspace/project endpoints) — DONE [2026-05-02 ~04:30 UTC]
 
 - `scryer auth login | logout | whoami` working against live Railway
