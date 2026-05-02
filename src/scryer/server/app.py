@@ -21,6 +21,7 @@ from scryer.server.api.audit import router as audit_router
 from scryer.server.api.auth import router as auth_router
 from scryer.server.api.datasets import router as datasets_router
 from scryer.server.api.healthz import router as healthz_router
+from scryer.server.api.internal import router as internal_router
 from scryer.server.api.me import router as me_router
 from scryer.server.api.projects import router as projects_router
 from scryer.server.api.runs import router as runs_router
@@ -87,6 +88,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(runs_router)
     api_v1.include_router(audit_router)
     app.include_router(api_v1)
+    app.include_router(internal_router)  # /internal/* — Cron only
 
     return app
 

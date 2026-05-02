@@ -43,6 +43,9 @@ async def login(
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> LoginResponse:
+    from scryer.server.services.rate_limit import check_login_rate
+
+    check_login_rate(body.email)
     user = await authenticate(session, email=body.email, password=body.password)
     await session.commit()
     from scryer.config import get_settings

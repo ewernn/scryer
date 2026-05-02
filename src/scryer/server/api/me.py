@@ -62,21 +62,21 @@ async def me(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MeResponse:
     workspaces = await list_workspaces_for_user(session, principal.id)
-    ws_summaries = [
-        {"id": str(w.id), "slug": w.slug, "name": w.name} for w in workspaces[:5]
-    ]
+    ws_summaries = [{"id": str(w.id), "slug": w.slug, "name": w.name} for w in workspaces[:5]]
     projects: list[dict[str, Any]] = []
     for w in workspaces[:3]:  # cap at 3 workspaces × 5 projects = 15 lookups max
         projs = await list_projects_for_user_in_workspace(
             session, workspace_id=w.id, user_id=principal.id
         )
         for p in projs[:5]:
-            projects.append({
-                "id": str(p.id),
-                "slug": p.slug,
-                "workspace_slug": w.slug,
-                "name": p.name,
-            })
+            projects.append(
+                {
+                    "id": str(p.id),
+                    "slug": p.slug,
+                    "workspace_slug": w.slug,
+                    "name": p.name,
+                }
+            )
     project_ids = [p["id"] for p in projects]
     datasets: list[dict[str, Any]] = []
     scorers: list[dict[str, Any]] = []
@@ -95,8 +95,7 @@ async def me(
             ).scalars()
         )
         datasets = [
-            {"id": str(d.id), "slug": d.slug, "version": d.version, "name": d.name}
-            for d in ds_rows
+            {"id": str(d.id), "slug": d.slug, "version": d.version, "name": d.name} for d in ds_rows
         ]
         sc_rows = list(
             (
@@ -110,8 +109,7 @@ async def me(
             ).scalars()
         )
         scorers = [
-            {"id": str(s.id), "slug": s.slug, "version": s.version, "name": s.name}
-            for s in sc_rows
+            {"id": str(s.id), "slug": s.slug, "version": s.version, "name": s.name} for s in sc_rows
         ]
 
     return MeResponse(

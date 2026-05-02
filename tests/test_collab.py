@@ -22,7 +22,6 @@ from scryer.server.services.collections import (
 from scryer.server.services.comments import (
     edit_comment,
     list_comments_for_resource,
-    list_comments_in_project,
     write_comment,
     write_system_comment,
 )

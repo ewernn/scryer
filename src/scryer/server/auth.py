@@ -53,6 +53,12 @@ async def get_principal(
 
 async def _principal_from_api_key(token: str, session: AsyncSession) -> Principal:
     row = await resolve_api_key(session, token)  # raises AuthError on failure
+    # Critic: last_used_at write was rolled back. Commit explicitly so the
+    # write survives the request — fast path so failure here doesn't fail auth.
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
     pid = (
         row.principal_user_id
         if row.principal_kind == PrincipalKind.user
