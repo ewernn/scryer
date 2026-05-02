@@ -1,0 +1,57 @@
+{% extends "_base.html" %}
+{% block title %}{{ project.slug }} · scryer{% endblock %}
+{% block content %}
+<nav class="text-sm text-zinc-500 mb-4">
+  <a href="/web/workspaces" class="hover:text-zinc-900">workspaces</a>
+  <span class="mx-1">/</span>
+  <span>{{ ws_slug }}</span>
+  <span class="mx-1">/</span>
+  <span class="text-zinc-900">{{ proj_slug }}</span>
+</nav>
+
+<h1 class="text-2xl font-bold mb-6">{{ project.name }}</h1>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <section>
+    <h2 class="text-sm uppercase font-semibold text-zinc-500 mb-2">Datasets ({{ datasets|length }})</h2>
+    <div class="space-y-2">
+      {% for d in datasets %}
+        <div class="p-3 bg-white border border-zinc-200 rounded">
+          <div class="font-semibold">{{ d.slug }}<span class="text-zinc-400 text-sm">@v{{ d.version }}</span></div>
+          <div class="text-xs text-zinc-500">{{ d.record_count }} records</div>
+        </div>
+      {% else %}
+        <div class="text-sm text-zinc-400 italic">none yet</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-sm uppercase font-semibold text-zinc-500 mb-2">Scorers ({{ scorers|length }})</h2>
+    <div class="space-y-2">
+      {% for s in scorers %}
+        <div class="p-3 bg-white border border-zinc-200 rounded">
+          <div class="font-semibold">{{ s.slug }}<span class="text-zinc-400 text-sm">@v{{ s.version }}</span></div>
+          <div class="text-xs text-zinc-500">{{ s.name }}</div>
+        </div>
+      {% else %}
+        <div class="text-sm text-zinc-400 italic">none yet</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section>
+    <h2 class="text-sm uppercase font-semibold text-zinc-500 mb-2">Tasks ({{ tasks|length }})</h2>
+    <div class="space-y-2">
+      {% for t in tasks %}
+        <div class="p-3 bg-white border border-zinc-200 rounded">
+          <div class="font-semibold">{{ t.slug }}<span class="text-zinc-400 text-sm">@v{{ t.version }}</span></div>
+          <div class="text-xs text-zinc-500 truncate">{{ t.name }}</div>
+        </div>
+      {% else %}
+        <div class="text-sm text-zinc-400 italic">none yet</div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

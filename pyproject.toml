@@ -39,6 +39,8 @@ dependencies = [
     "typer>=0.15",
     "rich>=13.9",
     "croniter>=2.0",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.18",
 ]
 
 [project.optional-dependencies]
@@ -76,7 +78,9 @@ select = [
     "ASYNC", # flake8-async
 ]
 ignore = [
-    "E501",  # line too long — handled by formatter
+    "E501",   # line too long — handled by formatter
+    "B008",   # function call in arg default — required by Typer
+    "UP047",  # PEP 695 generic syntax — TypeVar form is fine
 ]
 
 [tool.ruff.format]

@@ -1,0 +1,19 @@
+{% extends "_base.html" %}
+{% block title %}Workspaces · scryer{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Workspaces</h1>
+{% if workspaces %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {% for ws in workspaces %}
+      <a href="/web/workspaces/{{ ws.slug }}/projects/default"
+         class="block p-4 bg-white border border-zinc-200 rounded hover:border-zinc-400">
+        <div class="font-semibold">{{ ws.name }}</div>
+        <div class="text-sm text-zinc-500">{{ ws.slug }}</div>
+        <div class="text-xs text-zinc-400 mt-1">created {{ ws.created_at.strftime('%Y-%m-%d') }}</div>
+      </a>
+    {% endfor %}
+  </div>
+{% else %}
+  <p class="text-zinc-500">No workspaces yet.</p>
+{% endif %}
+{% endblock %}

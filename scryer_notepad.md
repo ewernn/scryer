@@ -175,6 +175,34 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 5 (Dashboard) + Phase 8 (production polish) — DONE [2026-05-02 ~11:30 UTC]
+
+**Phase 5 Dashboard (Jinja+htmx+Tailwind CDN):**
+- web.py: cookie-based JWT auth (httponly, secure, samesite=lax), 5 routes
+  (/web, /web/login GET+POST, /web/logout, /web/workspaces, /web/workspaces/
+  {ws}/projects/{p}, /web/runs/{run_id})
+- Templates: _base.html (header + Tailwind CDN + htmx), login.html,
+  workspaces.html, project.html (datasets/scorers/tasks 3-col grid),
+  run.html (status pill + results table + comments thread)
+- Web router calls service layer DIRECTLY per plan §4 API-first separation
+- Required `response_model=None` on routes returning `HTMLResponse |
+  RedirectResponse` (FastAPI tries to build a Pydantic schema otherwise)
+- 4 dashboard smoke tests
+- Deps: jinja2 + python-multipart for Form parsing
+
+**Phase 8 Production Polish:**
+- triggers.py: croniter-validated, max 20 active per workspace, min 5min
+  interval per plan §15
+- webhooks.py: HMAC-SHA256 signed payloads, exponential backoff
+  (1s/10s/100s/1000s), dead-letter, SSRF defense (RFC 5735 + DNS re-resolve
+  at fire time per plan §15)
+- Internal Cron endpoints: /internal/{dispatch-triggers,deliver-webhooks,
+  reap-stale-runs,keepalive}, X-Internal-Token gated
+- last_used_at write now committed (Phase 1.10 critic finding #9)
+- Login rate limit: in-memory sliding window 5/60s
+
+**TOTAL TESTS: 105 passing** (101 existing + 4 dashboard)
+
 ## End-of-night status [2026-05-02 ~10:00 UTC]
 
 **Live deploy verified:** <https://scryer-production.up.railway.app/api/v1/healthz>

@@ -90,6 +90,10 @@ def create_app() -> FastAPI:
     app.include_router(api_v1)
     app.include_router(internal_router)  # /internal/* — Cron only
 
+    from scryer.server.web import router as web_router
+
+    app.include_router(web_router)
+
     return app
 
 
