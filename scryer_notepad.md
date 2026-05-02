@@ -175,6 +175,34 @@ NAMING_CONVENTION = {
 
 ---
 
+## End-of-night status [2026-05-02 ~10:00 UTC]
+
+**Live deploy verified:** <https://scryer-production.up.railway.app/api/v1/healthz>
+returns 200 with Scryer-Version + Sunset + X-Request-ID headers.
+
+**101 tests passing.** 41 tables on Neon. Repo at <https://github.com/ewernn/scryer>.
+
+**Phases done (~7 hours of build):**
+- Phase 0: bootstrap (FastAPI + Alembic + uv + CI + Sentry stub + Railway)
+- Phase 1: Identity + Auth (62 tests)
+- Phase 2: Eval Core — schema + services + Run executor + endpoints + CLI
+- Phase 3 (partial): AuditEvent + Suite + Tag + UsageRecord services
+- Phase 4: Comments + Collections (incl. auto-Comment on run.completed)
+- Phase 6: /api/v1/me + Sunset/Scryer-Version headers
+
+**Phases pending:**
+- Phase 5 (dashboard): Jinja+htmx — biggest remaining ~2-3 days
+- Phase 7 (traitinterp wire-in): use scryer SDK in `experiments/judge_optimization/`
+- Phase 8 (production polish): Trigger dispatcher, Webhook delivery worker,
+  Budget circuit-breaker, Cron setup, monitoring, Sentry signup
+
+**Critic findings remaining (deferred from Phase 1.10/2.7):**
+- ApiKey.last_used_at write isn't committed (lost between requests) — Phase 8
+- record_count on Dataset is denormalized (drift potential) — could drop column
+- Login endpoint has no rate limit — Phase 8 before public beta
+
+**To resume tonight or tomorrow:** paste `RALPH.md` into a fresh session.
+
 ## Phase 6 (Agent UX) — DONE [2026-05-02 ~09:30 UTC]
 
 - GET /api/v1/me — agent first-call discovery; identity + scopes +
