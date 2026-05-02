@@ -15,10 +15,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from scryer.config import get_settings
+from scryer.server.models import Base  # registers all cluster models
 
-# Models will be imported here as clusters land in Phase 1+:
-# from scryer.server.models import Base
-target_metadata = None  # set to Base.metadata once models exist
+target_metadata = Base.metadata
 
 
 config = context.config

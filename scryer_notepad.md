@@ -1,0 +1,224 @@
+# scryer build notepad
+
+Running log of decisions, progress, surprises, and revisions during build. Plan
+of record lives in traitinterp at `docs/other/may2_scryer_plan.md` — this
+notepad documents how implementation deviates from or refines that plan.
+
+---
+
+## Layout & conventions
+
+```
+~/code/scryer/
+├── pyproject.toml          # uv-managed; deps + lint + mypy config
+├── alembic.ini
+├── migrations/             # alembic migrations + env.py
+├── src/scryer/
+│   ├── __init__.py         # __version__ via importlib.metadata
+│   ├── cli/                # typer subapps, one file per noun (Phase 1+)
+│   ├── config.py           # pydantic-settings; single source of env
+│   └── server/
+│       ├── app.py          # FastAPI factory + lifespan
+│       ├── db.py           # async engine + session factory + get_session DI
+│       ├── api/            # JSON endpoints, one file per noun
+│       ├── services/       # pure async functions; called by api/ AND cli/
+│       ├── models/         # SQLAlchemy 2.x Mapped[] models, by cluster
+│       └── templates/      # Jinja (Phase 5)
+└── tests/
+    ├── conftest.py         # transactional rollback fixtures
+    └── ...
+```
+
+**Conventions**
+- Service layer functions are pure async, take `(session, ...args)`, return domain objects (Pydantic models or SQLAlchemy ORM instances). Never raise HTTPException — that's API-layer concern. Service raises typed errors (e.g., `ScryerNotFoundError`) which the API layer maps to RFC 9457.
+- All services accept `session` as first arg (not `engine`); easier to test with rollback fixtures.
+- All API endpoints declare `response_model=` and `operation_id` (lint rule TBD).
+- Alembic migrations are auto-generated, then hand-edited if needed (autogenerate misses CHECK constraints, partial indexes, etc.).
+
+---
+
+## Phase 0 — done (2026-05-02)
+
+- Repo bootstrap: ✓ <https://github.com/ewernn/scryer> (public, Apache-2.0)
+- FastAPI + SQLAlchemy 2.x async + Alembic + Pydantic 2.x; uv-managed
+- /api/v1/healthz with DB ping; OpenAPI at /api/openapi.json
+- Sentry stub (no DSN; auto-attach via FastAPI integration)
+- GitHub Actions CI: ruff + ruff format + mypy strict + pytest on Python 3.12 + 3.13
+- Critic pass (5 fixes applied): dropped deprecated SentryAsgiMiddleware; moved engine to lifespan + app.state (no module globals); `__version__` via importlib.metadata; CI runs all branches; mypy no longer continue-on-error; fastapi-mcp pinned for Phase 6.
+- Neon PG 17.8 (us-west-2) connected; pooler hostname (`-pooler`) used for serverless friendliness.
+- R2 bucket `scryer-blobs` created (reuses traitinterp R2 account creds).
+
+**Phase 0 footguns documented**
+- Editable install goes stale on `pyproject.toml` changes — `uv sync` doesn't reliably re-register editable. Workaround: `uv pip install -e . --reinstall`. TODO: add a `Makefile` or `justfile` target.
+- Neon password starts with `npg_*` — easy to mistake for `pg_*` if reading quickly.
+- asyncpg uses `?ssl=require` in URL query, NOT `?sslmode=require` (which is libpq/psycopg).
+
+---
+
+## Phase 1 — Foundation cluster (Identity + Org + Auth) — IN PROGRESS
+
+### Plan §17 sub-tasks
+
+1.1 Schema spec — SQLAlchemy 2.x async models for cluster 1 (12 tables)
+1.2 Critic pass on schema before migration
+1.3 Generate + inspect Alembic migration
+1.4 Apply migration to Neon; verify
+1.5 Service layer (users, workspaces, projects, service_accounts, credentials, invitations, api_keys)
+1.6 Auth middleware (JWT + ApiKey + scope checking)
+1.7 Invitation + signup flow (auto-creates personal Workspace + default Project)
+1.8 Credential CRUD with AES-GCM (encryption_key_version aware)
+1.9 CLI: `scryer auth login`, `scryer workspace list`, `scryer project list`
+1.10 Final critic + verifier pass
+
+### Open design questions (research in flight)
+
+- **Polymorphic FK**: ApiKey.principal needs to point at User OR ServiceAccount. Plan picks "two nullable cols + CHECK". Investigator running. _Will document chosen pattern below once back._
+- **Argon2id params for password hashing** (OWASP 2025 defaults). Investigator running.
+- **AES-GCM nonce / encoding for Credentials**. Investigator running.
+- **Pytest transactional fixture pattern for asyncpg**. Investigator running.
+- **FastAPI auth DI pattern (JWT + ApiKey on same routes)**. Investigator running.
+- **Typer multi-noun layout for ~125 commands eventually**. Investigator running.
+
+### Decisions made so far in Phase 1 (locked from investigator returns)
+
+**Polymorphic FK pattern** (used in api_keys, budgets, audit_events.actor):
+- **Option A: two nullable cols + CHECK constraint**. Investigator confirmed: STI is wrong tool (principal isn't a subtype of ApiKey, it's an FK target); generic association sacrifices DB integrity.
+- Set `lazy="raise"` on relationships to force explicit loading (no implicit N+1).
+- CHECK constraint must be hand-added to migration (Alembic doesn't autogenerate per [issue #508](https://github.com/sqlalchemy/alembic/issues/508)).
+- Use a `principal()` accessor method on the model that returns the active one based on `principal_type`.
+
+**Password hashing** (User.password_hash):
+- `argon2-cffi` 25.x directly (passlib abandoned, pwdlib unnecessary wrapper).
+- Params: `time_cost=3, memory_cost=65536, parallelism=4, hash_len=32, salt_len=16` — about 2× OWASP 2025 floor.
+- Wrap in `asyncio.to_thread` (CPU-bound, blocks event loop otherwise).
+- Storage: PHC string in `VARCHAR(255)` or `TEXT`.
+- Use `check_needs_rehash` on login to upgrade old hashes lazily.
+
+**ApiKey hashing** (high-entropy tokens — NOT passwords):
+- `sha256` (NOT bcrypt/argon2 — input is uniformly random; rainbow-table attack impossible).
+- Format: `scrk_live_<43 b64url chars>` (32 random bytes).
+- Store `key_prefix` (first 16 chars) for indexed lookup, then verify hash via `hmac.compare_digest`.
+- This matches Stripe / GitHub / crates.io.
+
+**Invitation tokens**:
+- Format: `scrinv_<40 hex chars>` via `secrets.token_hex(20)` = 160 bits.
+- Store as sha256 hash.
+
+**AES-GCM for Credentials**:
+- `cryptography` lib's `AESGCM` class.
+- AES-256, random 12-byte nonce per encryption.
+- Storage: `base64(nonce || ciphertext || tag)` in TEXT column.
+- Lazy re-encrypt on read for key rotation; keep old keys in env vars `ENC_KEY_V1`, `ENC_KEY_V2`, etc.
+
+**JWT** (human session auth):
+- `pyjwt` 3.x (NOT python-jose — unmaintained).
+- HS256 (single-instance scryer; no multi-service token verification needed).
+- Access tokens 15-min TTL; refresh tokens stored as sha256 in `sessions` table with revocation flag.
+
+**FastAPI auth pattern** (no middleware — DI):
+- Single `HTTPBearer(auto_error=False)` dep called `get_principal`.
+- Inspects token prefix: `scrk_live_*` → ApiKey path; contains `.` → JWT path.
+- Returns a `Principal` dataclass `{id, kind, scopes: frozenset[str]}`.
+- Scope enforcement via `require_scope("write")` factory wrapping `Depends(get_principal)`.
+
+**RFC 9457 errors**:
+- `fastapi-problem-details` library + subclass `Problem` to add `retryable: bool` extension.
+- Override `RequestValidationError` handler so Pydantic 422s are also Problem-shape.
+- Set `Content-Type: application/problem+json` on responses.
+
+**Request correlation**:
+- `asgi-correlation-id` middleware with `X-Request-ID` header; `correlation_id.get()` ContextVar.
+- Will be threaded through AuditEvents in cluster 3.
+
+**CLI structure (Typer)**:
+- One file per noun: `src/scryer/cli/{auth,workspace,project,...}.py`; each exports `app = typer.Typer()`.
+- Root `cli/main.py` wires via `app.add_typer(dataset.app, name="dataset")`.
+- Shared state via `@app.callback()` + `ctx.ensure_object(dict)`.
+- Credentials at `platformdirs.user_config_path / "credentials.json"`.
+- `--profile <name>` flag on root callback for multi-env.
+- `--output table|json|yaml` global flag (default table via `rich`).
+- CLI imports the scryer Python SDK (when it exists); SDK is the source of truth for HTTP calls.
+- Use `Annotated[X, typer.Option(...)]` syntax (Typer 0.9+ preferred form).
+
+**Pytest async strategy**:
+- Session-scoped engine fixture; per-test `session` fixture with `join_transaction_mode="create_savepoint"` + outer-transaction-rolled-back-on-teardown.
+- `pyproject.toml` config: `asyncio_default_fixture_loop_scope = session` + `asyncio_default_test_loop_scope = session` (NOT custom event_loop fixture — deprecated in pytest-asyncio ≥0.23).
+- Migrations applied once at session start (Option a for local dev).
+- Future: Neon branch per CI run via `neondatabase/create-branch-action@v5` (Option b — defer until CI flakes on shared DB state).
+- FastAPI endpoint testing: override `Depends(get_session)` to yield the test's session; use `httpx.AsyncClient` with `ASGITransport` (NOT TestClient — sync/async loop mismatch).
+
+**Naming convention** (DB constraints, for clean Alembic autogen):
+```
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+```
+
+---
+
+## Decision log
+
+| Date | Phase | Decision | Reason |
+|---|---|---|---|
+| 2026-05-02 | 0 | Apache-2.0 license | OSS infra default; permissive + patent grant |
+| 2026-05-02 | 0 | uv (not pip-tools) | modern, fast, lockfile, single-tool ergonomics |
+| 2026-05-02 | 0 | Server-rendered Jinja+htmx (no Next.js v0) | per plan §4 — API-first means Jinja can be swapped later |
+| 2026-05-02 | 0 | Drop SentryAsgiMiddleware | deprecated in sentry-sdk 2.x; FastAPI integration auto-attaches |
+| 2026-05-02 | 0 | Engine on app.state via lifespan, NOT lru_cache | tests need to swap DB URL per fixture |
+| 2026-05-02 | 0 | Use traitinterp R2 var names (R2_ENDPOINT, R2_BUCKET_NAME) | copy-paste from traitinterp .env |
+| 2026-05-02 | 0 | Neon free tier sufficient | bulky data goes to R2; PG holds structured rows only |
+| 2026-05-02 | 0 | Skip Neon Auth | scryer owns auth model per plan §6; vendor lock-in concern |
+
+---
+
+## Surprises and revisions to plan
+
+**2026-05-02 — sha256 (not bcrypt) for ApiKey/Invitation token hashing.** Plan
+§6 originally said `bcrypt of full key`. Investigator + critic agreed sha256
+is correct: input is 32-byte uniformly-random token (256 bits entropy), so
+preimage attacks are infeasible regardless of hash speed. bcrypt would add
+~50ms per request for zero security gain. This matches Stripe / GitHub /
+crates.io. **Plan §6 updated** to reflect sha256.
+
+**2026-05-02 — Native PG enums replaced with `native_enum=False`.** Plan §11
+implies native enums; investigator flagged that they break per-test schema
+isolation (enums are global, not schema-scoped). Switched to CHECK-constrained
+VARCHAR. Python enum still validates at the ORM layer. Cost: lose PG-side
+typo detection at the column level (CHECK gives that anyway).
+
+**2026-05-02 — Critic-pass-driven schema refinements applied to cluster 1
+before generating first migration.** Notable:
+- Polymorphic `User.api_keys` relationship uses `foreign(ApiKey.principal_user_id)`
+  + `PrincipalKind.user` literal in primaryjoin (was failing).
+- `Numeric(12,4)` mapped to `Decimal` not `float`.
+- Partial UNIQUE on `users(email) WHERE archived_at IS NULL` — soft-deleted
+  users free their email for reuse.
+- ApiKey FKs use `ondelete=RESTRICT` not `CASCADE` (audit preservation).
+- ApiKey.scopes has `server_default="'{}'"` for raw-SQL inserts.
+- CHECK on `Invitation(expires_at > created_at)` and `Budget(period_end >
+  period_start)` and `Workspace(active_run_count >= 0)`.
+- `share_grants.expires_at` added (every other grant noun has it).
+- `api_key_usage` indexed on `timestamp` for billing queries.
+- Multi-column UNIQUE constraints renamed to include all column names
+  (`uq_workspace_members_workspace_user`, etc.).
+
+---
+
+## Subagent log
+
+| Date | Agent | Question | Outcome |
+|---|---|---|---|
+| 2026-05-02 | r:critic | Phase 0 bootstrap review | 5 fixes applied; no blockers |
+| 2026-05-02 | r:investigator | SQLAlchemy 2.x async polymorphic FK | running |
+| 2026-05-02 | r:investigator | Argon2id + AES-GCM defaults | running |
+| 2026-05-02 | r:investigator | Pytest async transactional rollback | running |
+| 2026-05-02 | r:investigator | FastAPI auth middleware + RFC 9457 | running |
+| 2026-05-02 | r:investigator | Typer multi-noun CLI structure | done — Typer add_typer; @callback ctx; platformdirs |
+| 2026-05-02 | r:investigator | SQLAlchemy 2.x async polymorphic FK | done — Option A (two nullable + CHECK) |
+| 2026-05-02 | r:investigator | Argon2id + AES-GCM defaults | done — argon2-cffi direct; sha256 for ApiKey; cryptography AESGCM |
+| 2026-05-02 | r:investigator | FastAPI auth + RFC 9457 + correlation ID | done — HTTPBearer DI; fastapi-problem-details; asgi-correlation-id |
+| 2026-05-02 | r:investigator | Pytest async transactional rollback | done — savepoint pattern; loop_scope=session |

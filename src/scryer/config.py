@@ -28,10 +28,10 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy URL. Neon Postgres in prod.",
     )
 
-    r2_account_id: str = ""
+    r2_endpoint: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
-    r2_bucket: str = "scryer-blobs"
+    r2_bucket_name: str = "scryer-blobs"
 
     encryption_key: str = Field(
         default="",

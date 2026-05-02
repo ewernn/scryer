@@ -30,6 +30,14 @@ dependencies = [
     "httpx>=0.28",
     "sentry-sdk[fastapi]>=2.18",
     "fastapi-mcp>=0.3",
+    "argon2-cffi>=25.1",
+    "cryptography>=44",
+    "pyjwt>=2.10",
+    "fastapi-problem-details>=0.1",
+    "asgi-correlation-id>=4.3",
+    "platformdirs>=4.3",
+    "typer>=0.15",
+    "rich>=13.9",
 ]
 
 [project.optional-dependencies]
@@ -87,4 +95,6 @@ disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
