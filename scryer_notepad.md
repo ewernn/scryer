@@ -175,6 +175,60 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 5+8 critic fixes — DONE [2026-05-02 ~12:30 UTC]
+
+Three critical critic findings fixed:
+- **Trigger workspace_id bug**: `triggers.py:113` was passing `task.project_id`
+  for `Run.workspace_id` (different FK target). Now resolves Project →
+  workspace_id explicitly.
+- **IDOR on /web/runs/{run_id}**: any logged-in user could read any other
+  tenant's Run + Results + Comments by guessing UUID. Now calls
+  `assert_project_access(principal, run.project_id)`.
+- **Race in cron workers**: `dispatch_due_triggers` and `deliver_pending`
+  lacked SELECT...FOR UPDATE SKIP LOCKED. Both now use
+  `with_for_update(skip_locked=True)` so concurrent Railway Cron pings
+  don't double-fire.
+
+Important fixes:
+- Cookie `secure` flag env-driven (RAILWAY_ENVIRONMENT or ENV=prod) — local
+  HTTP dev works.
+- Login exception handler tightened to (AuthError, PermissionError); other
+  exceptions propagate to RFC 9457 handler.
+- Rate limit keyed by (email | client_ip) not email alone — DoS-resistant.
+
+IDOR regression test added → 106 tests total.
+
+## ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## FINAL STATUS [2026-05-02 ~12:30 UTC]
+
+**All 8 plan phases addressed** (Phase 7 explicitly skipped per user).
+
+| Phase | Status | Tests |
+|---|---|---|
+| 0  Bootstrap | ✓ | 3 |
+| 1  Identity + Auth | ✓ | 62 |
+| 2  Eval Core | ✓ | 16 |
+| 3  Audit + Suite + Tag + Usage | ✓ (Trigger/Webhook done in Phase 8) | 7 |
+| 4  Comments + Collections | ✓ | 8 |
+| 5  Dashboard | ✓ | 5 |
+| 6  Agent UX | ✓ | 3 |
+| 7  traitinterp wire-in | SKIPPED per user | — |
+| 8  Production polish | ✓ | (regressions in 5+8) |
+
+**106 tests passing.** Live: <https://scryer-production.up.railway.app/api/v1/healthz>
++ <https://scryer-production.up.railway.app/web/login>.
+
+**Open follow-ups** (not blockers; capture in tickets when scryer has issue tracking):
+- Empty-workspace landing has no "create workspace" button — first-user UX gap
+- "Run task" button on project page (currently CLI-only)
+- Live status updates on run page (htmx already loaded; 5 lines)
+- Webhook URL pre-validation should also reject private IPs at creation
+- JWT logout doesn't blacklist; relies on TTL
+- Tailwind CDN dependency — pre-build before public launch
+- Pre-deploy `SCRYER_INTERNAL_TOKEN` env var on Railway must be set for Cron
+  endpoints; document in deploy runbook
+
 ## Phase 5 (Dashboard) + Phase 8 (production polish) — DONE [2026-05-02 ~11:30 UTC]
 
 **Phase 5 Dashboard (Jinja+htmx+Tailwind CDN):**
