@@ -175,6 +175,25 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 6 (Agent UX) — DONE [2026-05-02 ~09:30 UTC]
+
+- GET /api/v1/me — agent first-call discovery; identity + scopes +
+  top_resources (capped at 5 each: workspaces, projects, datasets, scorers)
+- ApiVersionHeadersMiddleware: every response carries Scryer-Version,
+  Sunset, and Link: rel="deprecation"
+- asgi-correlation-id already wired (Phase 1.10) → X-Request-ID present
+- MCP server mount DEFERRED per plan §16 — observe agent usage 2 weeks
+  before curating /mcp/curated. Current OpenAPI sufficient.
+- 3 new endpoint tests → 101 tests total
+
+## Phase 4 (Comments + Collections) — DONE [2026-05-02 ~09:00 UTC]
+
+- Cluster 4 (4 tables): comments, comment_versions, collections, collection_members
+- Comments: polymorphic author, slim structured={tldr,confidence}, references
+  as opaque JSONB list, system Comments immutable
+- Auto-Comment on run.completed/failed (plan §8 layer 3) — wired into runs.py
+- 8 new tests → 98 tests
+
 ## Phase 3 (Audit + Suite + Tag + Usage) — PARTIAL [2026-05-02 ~08:30 UTC]
 
 - Cluster 3 schema: 11 tables (audit_events, suites, suite_tasks, suite_runs,

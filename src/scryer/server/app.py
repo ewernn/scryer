@@ -21,6 +21,7 @@ from scryer.server.api.audit import router as audit_router
 from scryer.server.api.auth import router as auth_router
 from scryer.server.api.datasets import router as datasets_router
 from scryer.server.api.healthz import router as healthz_router
+from scryer.server.api.me import router as me_router
 from scryer.server.api.projects import router as projects_router
 from scryer.server.api.runs import router as runs_router
 from scryer.server.api.scorers import router as scorers_router
@@ -67,12 +68,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from scryer.server.middleware import ApiVersionHeadersMiddleware
+
+    app.add_middleware(ApiVersionHeadersMiddleware)
     app.add_middleware(CorrelationIdMiddleware, header_name="X-Request-ID")
     app.add_exception_handler(ScryerError, scryer_error_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
 
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(healthz_router)
+    api_v1.include_router(me_router)
     api_v1.include_router(auth_router)
     api_v1.include_router(workspaces_router)
     api_v1.include_router(projects_router)
