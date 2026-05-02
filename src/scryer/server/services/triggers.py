@@ -20,6 +20,7 @@ from scryer.server.models.enums import (
     TriggerKind,
     TriggerTarget,
 )
+from scryer.server.models.auth import Project
 from scryer.server.models.eval import Run, Task
 from scryer.server.services.errors import (
     ConflictError,
@@ -84,7 +85,11 @@ async def create_schedule_trigger(
 
 
 async def dispatch_due_triggers(session: AsyncSession, *, now: datetime | None = None) -> list[Run]:
-    """Fire all Triggers with next_fire_at <= now. Returns the Runs queued."""
+    """Fire all Triggers with next_fire_at <= now. Returns the Runs queued.
+
+    Uses SELECT ... FOR UPDATE SKIP LOCKED so concurrent Cron pings don't
+    double-fire the same Trigger.
+    """
     now = now or datetime.now(UTC)
     due = list(
         (
@@ -93,6 +98,7 @@ async def dispatch_due_triggers(session: AsyncSession, *, now: datetime | None =
                 .where(Trigger.is_active.is_(True))
                 .where(Trigger.kind == TriggerKind.schedule)
                 .where(Trigger.next_fire_at <= now)
+                .with_for_update(skip_locked=True)
             )
         ).scalars()
     )
@@ -106,11 +112,15 @@ async def dispatch_due_triggers(session: AsyncSession, *, now: datetime | None =
                 continue
             from scryer.server.services.runs import queue_run
 
+            project = await session.get(Project, task.project_id)
+            if project is None:
+                trig.is_active = False
+                continue
             run = await queue_run(
                 session,
                 task_id=task.id,
-                workspace_id=task.project_id,  # placeholder; resolve via project
-                project_id=task.project_id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
             )
             queued_runs.append(run)
         # Suite target: similar dispatch via execute_suite (deferred for v0

@@ -112,6 +112,7 @@ async def deliver_pending(
                 .where(WebhookDelivery.next_attempt_at <= now)
                 .order_by(WebhookDelivery.id)
                 .limit(limit)
+                .with_for_update(skip_locked=True)
             )
         ).scalars()
     )

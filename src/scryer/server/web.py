@@ -4,10 +4,12 @@ Per plan §4: API-first separation. Web routes call service functions
 DIRECTLY (no internal HTTP). Same JSON API serves CLI/SDK/dashboard.
 
 Auth via httponly cookie set by /web/login → POST. JWT in cookie.
+Cookie `secure` flag is env-driven so local dev over plain HTTP works.
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -33,6 +35,7 @@ from scryer.server.services.workspaces import list_workspaces_for_user
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 COOKIE_NAME = "scryer_session"
+_COOKIE_SECURE = bool(os.environ.get("RAILWAY_ENVIRONMENT")) or os.environ.get("ENV") == "prod"
 
 router = APIRouter(tags=["web"], include_in_schema=False)
 
@@ -70,17 +73,22 @@ async def login_submit(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ) -> HTMLResponse | RedirectResponse:
+    from scryer.server.services.errors import PermissionError as ScryerPermErr
+
+    client_host = request.client.host if request.client else "unknown"
+    rate_key = f"{email}|{client_host}"
     try:
-        check_login_rate(email)
+        check_login_rate(rate_key)
         user = await authenticate(session, email=email, password=password)
-    except (AuthError, Exception) as exc:
+    except (AuthError, ScryerPermErr) as exc:
         return templates.TemplateResponse(
             request, "login.html", {"error": str(exc)}, status_code=401
         )
+    # Other exceptions propagate → central handler returns 500
     await session.commit()
     token = issue_access_jwt(str(user.id))
     resp = RedirectResponse("/web/workspaces", status_code=303)
-    resp.set_cookie(COOKIE_NAME, token, httponly=True, secure=True, samesite="lax")
+    resp.set_cookie(COOKIE_NAME, token, httponly=True, secure=_COOKIE_SECURE, samesite="lax")
     return resp
 
 
@@ -147,10 +155,17 @@ async def run_page(
     user_id: Annotated[uuid.UUID, Depends(_require_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> HTMLResponse:
+    from scryer.server.auth import Principal
+    from scryer.server.services.access import assert_project_access
     from scryer.server.services.comments import list_comments_for_resource
 
     rid = uuid.UUID(run_id)
     run = await get_run(session, rid)
+    # IDOR fix: principal must have access to the project this Run belongs to
+    principal = Principal(
+        id=user_id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read})
+    )
+    await assert_project_access(session, principal, run.project_id)
     results = await list_results(session, rid)
     comments = await list_comments_for_resource(session, resource_type="run", resource_id=rid)
     return templates.TemplateResponse(
