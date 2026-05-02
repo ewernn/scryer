@@ -27,8 +27,10 @@ from scryer.server.services.errors import AuthError
 from scryer.server.services.rate_limit import check_login_rate
 from scryer.server.services.runs import get_run, list_results
 from scryer.server.services.security import (
+    generate_csrf,
     issue_access_jwt,
     verify_access_jwt,
+    verify_csrf,
 )
 from scryer.server.services.users import authenticate, get_user
 from scryer.server.services.workspaces import list_workspaces_for_user
@@ -54,6 +56,7 @@ async def _require_user(
         raise HTTPException(status.HTTP_303_SEE_OTHER, headers={"location": "/web/login"}) from exc
     user_id = uuid.UUID(claims["sub"])
     await get_user(session, user_id)  # validate still active
+    request.state.csrf_token = generate_csrf(scryer_session)
     return user_id
 
 
@@ -93,7 +96,12 @@ async def login_submit(
 
 
 @router.post("/web/logout")
-async def logout() -> RedirectResponse:
+async def logout(
+    csrf: Annotated[str, Form()],
+    scryer_session: Annotated[str | None, Cookie()] = None,
+) -> RedirectResponse:
+    if not scryer_session or not verify_csrf(scryer_session, csrf):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
     resp = RedirectResponse("/web/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME)
     return resp
@@ -107,7 +115,13 @@ async def workspaces_page(
 ) -> HTMLResponse:
     workspaces = await list_workspaces_for_user(session, user_id)
     return templates.TemplateResponse(
-        request, "workspaces.html", {"workspaces": workspaces, "user_id": str(user_id)}
+        request,
+        "workspaces.html",
+        {
+            "workspaces": workspaces,
+            "user_id": str(user_id),
+            "csrf_token": request.state.csrf_token,
+        },
     )
 
 
@@ -144,6 +158,7 @@ async def project_page(
             "datasets": datasets,
             "scorers": scorers,
             "tasks": tasks,
+            "csrf_token": request.state.csrf_token,
         },
     )
 
@@ -182,5 +197,6 @@ async def run_page(
             "per_page": per_page,
             "total_pages": total_pages,
             "total_records": total_records,
+            "csrf_token": request.state.csrf_token,
         },
     )

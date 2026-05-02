@@ -17,9 +17,12 @@
       <nav class="text-sm text-zinc-500 flex gap-4">
         <a href="/api/openapi.json" class="hover:text-zinc-900">openapi</a>
         <a href="/api/docs" class="hover:text-zinc-900">api docs</a>
+        {% if csrf_token %}
         <form action="/web/logout" method="post" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf_token }}" />
           <button class="hover:text-zinc-900">logout</button>
         </form>
+        {% endif %}
       </nav>
     </div>
   </header>

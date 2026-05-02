@@ -185,3 +185,27 @@ def verify_access_jwt(token: str) -> dict[str, Any]:
         audience=JWT_AUDIENCE,
         leeway=10,
     )
+
+
+# ─── CSRF tokens for /web/* form POSTs ───────────────────────────────────────
+
+# Pattern: token = HMAC-SHA256(jwt_secret, session_jwt). Stateless — server
+# verifies by recomputing from the same session cookie. SameSite=lax on the
+# session cookie blocks most cross-origin form POSTs already; this catches
+# the residual subset (top-level POSTs from same-site contexts, browser bugs).
+
+
+def generate_csrf(session_jwt: str) -> str:
+    s = get_settings()
+    if not s.jwt_secret:
+        raise RuntimeError("JWT_SECRET env var is empty")
+    return hmac.new(
+        s.jwt_secret.encode("utf-8"),
+        session_jwt.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_csrf(session_jwt: str, supplied_token: str) -> bool:
+    expected = generate_csrf(session_jwt)
+    return hmac.compare_digest(expected, supplied_token)

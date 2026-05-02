@@ -60,9 +60,7 @@ async def test_owner_creates_invite_then_invitee_signs_up(
     assert str(sb["workspace_id"]) == body["workspace_id"]
 
 
-async def test_signup_wrong_email_rejected(
-    client: AsyncClient, http_session: AsyncSession
-) -> None:
+async def test_signup_wrong_email_rejected(client: AsyncClient, http_session: AsyncSession) -> None:
     email_o, pw_o, ws = await _signup_owner(http_session)
     h = await _bearer(client, email_o, pw_o)
 
