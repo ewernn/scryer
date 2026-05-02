@@ -128,3 +128,20 @@ class WebhookDeliveryStatus(StrEnum):
     delivered = "delivered"
     failed = "failed"
     dead_letter = "dead_letter"
+
+
+class CommentKind(StrEnum):
+    """Plan §8: distinguishes user/agent narrative vs system auto-events."""
+
+    user = "user"
+    agent = "agent"
+    system = "system"
+
+
+class CollectionPurpose(StrEnum):
+    """Plan §10: Collection's `purpose` enum — what this bundle is for."""
+
+    investigation = "investigation"
+    incident = "incident"
+    showcase = "showcase"
+    other = "other"

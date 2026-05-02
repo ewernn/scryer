@@ -142,6 +142,26 @@ async def execute_run(
     run.completed_at = datetime.now(UTC)
     run.last_heartbeat_at = run.completed_at
     await session.flush()
+
+    # Plan §8 layer 3: auto-Comment on run.completed/failed
+    from scryer.server.services.comments import write_system_comment
+
+    summary = (
+        f"Run {run.id} → {run.status.value} ({n_done}/{run.n_records} done, {n_failed} failed)"
+    )
+    await write_system_comment(
+        session,
+        project_id=run.project_id,
+        body=summary,
+        resource_type="run",
+        resource_id=run.id,
+        structured={
+            "tldr": summary,
+            "confidence": 1.0,
+            "n_done": n_done,
+            "n_failed": n_failed,
+        },
+    )
     return run
 
 

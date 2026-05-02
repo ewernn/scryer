@@ -41,7 +41,10 @@ async def _setup(session: AsyncSession):
         session, slug=f"w-{uuid4().hex[:6]}", name="t", owner_user_id=user.id
     )
     proj = await create_project(
-        session, workspace_id=ws.id, slug=f"p-{uuid4().hex[:6]}", name="t",
+        session,
+        workspace_id=ws.id,
+        slug=f"p-{uuid4().hex[:6]}",
+        name="t",
         owner_user_id=user.id,
     )
     return user, ws, proj
@@ -51,8 +54,12 @@ async def test_audit_event_write_with_principal_user(session: AsyncSession) -> N
     user, ws, _ = await _setup(session)
     principal = Principal(id=user.id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read}))
     ev = await write_event(
-        session, action="resource.create", actor=principal, workspace_id=ws.id,
-        resource_type="workspace", resource_id=ws.id,
+        session,
+        action="resource.create",
+        actor=principal,
+        workspace_id=ws.id,
+        resource_type="workspace",
+        resource_id=ws.id,
     )
     assert ev.actor_kind == ActorKind.user
     assert ev.actor_user_id == user.id
@@ -61,7 +68,9 @@ async def test_audit_event_write_with_principal_user(session: AsyncSession) -> N
 
 async def test_audit_event_redacts_sensitive_fields(session: AsyncSession) -> None:
     ev = await write_event(
-        session, action="resource.update", actor_kind=ActorKind.system,
+        session,
+        action="resource.update",
+        actor_kind=ActorKind.system,
         before_json={"password_hash": "abc", "name": "old"},
         after_json={"password_hash": "xyz", "name": "new"},
     )
@@ -74,12 +83,20 @@ async def test_audit_event_list_filters_by_resource(session: AsyncSession) -> No
     user, ws, _ = await _setup(session)
     rid = uuid4()
     await write_event(
-        session, action="resource.create", actor_kind=ActorKind.system,
-        workspace_id=ws.id, resource_type="dataset", resource_id=rid,
+        session,
+        action="resource.create",
+        actor_kind=ActorKind.system,
+        workspace_id=ws.id,
+        resource_type="dataset",
+        resource_id=rid,
     )
     await write_event(
-        session, action="resource.update", actor_kind=ActorKind.system,
-        workspace_id=ws.id, resource_type="dataset", resource_id=rid,
+        session,
+        action="resource.update",
+        actor_kind=ActorKind.system,
+        workspace_id=ws.id,
+        resource_type="dataset",
+        resource_id=rid,
     )
     rows = await list_events(session, resource_type="dataset", resource_id=rid)
     assert len(rows) == 2
@@ -111,27 +128,38 @@ async def test_suite_execute_runs_all_tasks(session: AsyncSession) -> None:
         session, project_id=proj.id, slug="d", name="d", records=[{"inputs": {"x": 1}}]
     )
     sc = await push_scorer(
-        session, project_id=proj.id, slug="s", name="S",
+        session,
+        project_id=proj.id,
+        slug="s",
+        name="S",
         source_text="def score(inputs, expected, metadata): return {'score': 1.0}",
     )
     t1 = await push_task(
-        session, project_id=proj.id, slug="t1", name="T1",
-        dataset_id=ds.id, dataset_version=ds.version,
-        scorer_id=sc.id, scorer_version=sc.version,
+        session,
+        project_id=proj.id,
+        slug="t1",
+        name="T1",
+        dataset_id=ds.id,
+        dataset_version=ds.version,
+        scorer_id=sc.id,
+        scorer_version=sc.version,
     )
     t2 = await push_task(
-        session, project_id=proj.id, slug="t2", name="T2",
-        dataset_id=ds.id, dataset_version=ds.version,
-        scorer_id=sc.id, scorer_version=sc.version,
+        session,
+        project_id=proj.id,
+        slug="t2",
+        name="T2",
+        dataset_id=ds.id,
+        dataset_version=ds.version,
+        scorer_id=sc.id,
+        scorer_version=sc.version,
     )
 
     suite = await create_suite(session, project_id=proj.id, slug="reg", name="Regression")
     await add_task_to_suite(session, suite_id=suite.id, task_id=t1.id, position=1)
     await add_task_to_suite(session, suite_id=suite.id, task_id=t2.id, position=2)
 
-    sr = await execute_suite(
-        session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id
-    )
+    sr = await execute_suite(session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id)
     assert sr.completed_at is not None
     runs = await list_runs_in_suite(session, sr.id)
     assert len(runs) == 2
@@ -143,14 +171,24 @@ async def test_usage_record_and_aggregate(session: AsyncSession) -> None:
 
     _, ws, proj = await _setup(session)
     await record_usage(
-        session, workspace_id=ws.id, project_id=proj.id,
-        provider="openai", model="gpt-4o-mini",
-        input_tokens=100, output_tokens=20, cost_usd=Decimal("0.0123"),
+        session,
+        workspace_id=ws.id,
+        project_id=proj.id,
+        provider="openai",
+        model="gpt-4o-mini",
+        input_tokens=100,
+        output_tokens=20,
+        cost_usd=Decimal("0.0123"),
     )
     await record_usage(
-        session, workspace_id=ws.id, project_id=proj.id,
-        provider="openai", model="gpt-4o-mini",
-        input_tokens=50, output_tokens=10, cost_usd=Decimal("0.0061"),
+        session,
+        workspace_id=ws.id,
+        project_id=proj.id,
+        provider="openai",
+        model="gpt-4o-mini",
+        input_tokens=50,
+        output_tokens=10,
+        cost_usd=Decimal("0.0061"),
     )
     total = await total_cost_for_workspace_since(
         session, workspace_id=ws.id, since=datetime.now(UTC) - timedelta(hours=1)
