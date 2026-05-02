@@ -71,3 +71,29 @@ class InvitationStatus(StrEnum):
     used = "used"
     expired = "expired"
     revoked = "revoked"
+
+
+class PromptTemplateFormat(StrEnum):
+    """Format for Prompt.template — controls how variables are interpolated."""
+
+    plain = "plain"  # no interpolation; literal string
+    fstring = "fstring"  # Python f-string-style {var}
+    jinja = "jinja"  # Jinja2 templating
+
+
+class RunStatus(StrEnum):
+    """Run lifecycle. Transitions enforced in service layer + DB CHECK."""
+
+    queued = "queued"
+    running = "running"
+    done = "done"
+    failed = "failed"
+    cancelled = "cancelled"
+    superseded = "superseded"
+
+
+class TraceStorage(StrEnum):
+    """Where trace steps live. Set at flush time based on n_steps."""
+
+    inline = "inline"  # trace_steps table
+    r2 = "r2"  # storage_uri populated

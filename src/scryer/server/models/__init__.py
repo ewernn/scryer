@@ -21,6 +21,20 @@ from scryer.server.models.auth import (  # noqa: F401
     WorkspaceSlug,
 )
 from scryer.server.models.base import Base  # noqa: F401
+from scryer.server.models.eval import (  # noqa: F401
+    Agent,
+    AgentTool,
+    Dataset,
+    DatasetRecord,
+    Prompt,
+    Result,
+    Run,
+    Scorer,
+    Task,
+    Tool,
+    Trace,
+    TraceStep,
+)
 
 __all__ = [
     "ApiKey",

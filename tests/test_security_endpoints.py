@@ -63,9 +63,7 @@ async def test_user_cannot_list_projects_in_other_workspace(
     "header_value",
     ["", "Bearer", "Bearer ", "Basic abc123", "Bearer ..", "Bearer scrk_live_bogus"],
 )
-async def test_malformed_auth_returns_401_problem(
-    client: AsyncClient, header_value: str
-) -> None:
+async def test_malformed_auth_returns_401_problem(client: AsyncClient, header_value: str) -> None:
     r = await client.get("/api/v1/workspaces", headers={"Authorization": header_value})
     assert r.status_code == 401
     assert r.headers.get("content-type", "").startswith("application/problem+json")
@@ -76,8 +74,6 @@ async def test_jwt_with_non_uuid_sub_returns_401_not_500(client: AsyncClient) ->
     from scryer.server.services.security import issue_access_jwt
 
     bad = issue_access_jwt("not-a-uuid")
-    r = await client.get(
-        "/api/v1/workspaces", headers={"Authorization": f"Bearer {bad}"}
-    )
+    r = await client.get("/api/v1/workspaces", headers={"Authorization": f"Bearer {bad}"})
     assert r.status_code == 401
     assert r.headers.get("content-type", "").startswith("application/problem+json")

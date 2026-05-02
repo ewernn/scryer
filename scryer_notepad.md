@@ -175,6 +175,24 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 2.1-2.4 (Eval Core schema + services + Run executor) — DONE [2026-05-02 ~06:30 UTC]
+
+- Cluster 2: 12 tables (datasets, dataset_records, scorers, agents, tools,
+  agent_tools, prompts, tasks, runs, results, traces, trace_steps); migration
+  applied to Neon
+- VersionedMixin extracted (project_id + slug + version + content_hash + parent_id)
+- Services: datasets, scorers, agents, tools, prompts, tasks (with version
+  validation on bind)
+- _versioned.py shared helpers: content_hash, next_version, get_latest,
+  get_version, list_latest_per_slug
+- Sandbox (Tier 1+ subprocess): stripped env, ulimits (best-effort on macOS;
+  Linux-strict on Railway), timeout, JSON-stdio runner with traceback capture
+- Run executor: queue_run + execute_run with heartbeat every 10 records,
+  resume_cursor, RunStatus transitions, Trace stub per Run
+- 16 new tests passing (11 service + 5 executor): full Scorer-runs-in-subprocess
+  end-to-end with real Result rows
+- TOTAL TESTS: 78 passing
+
 ## Phase 1.10 (final critic + 3 critical fixes) — DONE [2026-05-02 ~05:00 UTC]
 
 - **Critical: cross-tenant leak in GET /workspaces/{slug}** fixed via new
