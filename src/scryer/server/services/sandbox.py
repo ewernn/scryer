@@ -107,6 +107,11 @@ async def run_user_code(
         "HOME": str(workdir),
         "TMPDIR": str(workdir),
         "PYTHONUNBUFFERED": "1",
+        # Determinism: stable hash seed makes set/dict ordering reproducible
+        # across runs of the same Scorer; .pyc disabled so source changes
+        # take immediate effect (no stale bytecode-cache surprises).
+        "PYTHONHASHSEED": "0",
+        "PYTHONDONTWRITEBYTECODE": "1",
     }
     if env:
         sub_env.update(env)

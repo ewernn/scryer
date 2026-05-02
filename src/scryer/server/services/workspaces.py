@@ -138,6 +138,30 @@ async def rename_workspace_slug(
     return ws
 
 
+async def add_workspace_member(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    role: WorkspaceRole,
+) -> WorkspaceMember:
+    """Add a user to a workspace with the given role. Caller is responsible
+    for authorization (only owners may add members in v0). Raises
+    ConflictError if the user is already a member."""
+    existing = await session.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise ConflictError(f"User {user_id} is already a member of workspace {workspace_id}")
+    member = WorkspaceMember(workspace_id=workspace_id, user_id=user_id, role=role)
+    session.add(member)
+    await session.flush()
+    return member
+
+
 async def list_workspaces_for_user(session: AsyncSession, user_id: uuid.UUID) -> list[Workspace]:
     """All non-archived workspaces this user belongs to (any role)."""
     stmt = (
