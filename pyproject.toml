@@ -29,6 +29,7 @@ dependencies = [
     "structlog>=24.4",
     "httpx>=0.28",
     "sentry-sdk[fastapi]>=2.18",
+    "fastapi-mcp>=0.3",
 ]
 
 [project.optional-dependencies]

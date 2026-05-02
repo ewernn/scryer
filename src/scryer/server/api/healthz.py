@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from scryer import __version__
-from scryer.server.db import get_engine
 
 router = APIRouter()
 
@@ -21,11 +20,10 @@ class HealthResponse(BaseModel):
 
 
 @router.get("/healthz", response_model=HealthResponse, tags=["meta"])
-async def healthz() -> HealthResponse:
+async def healthz(request: Request) -> HealthResponse:
     db_ok = True
     try:
-        engine = get_engine()
-        async with engine.connect() as conn:
+        async with request.app.state.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception:
         db_ok = False

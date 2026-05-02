@@ -1,12 +1,16 @@
 """SQLAlchemy 2.x async engine + session factory.
 
-Single engine per process; AsyncSessionLocal yields scoped sessions.
+Engine is built once per app via the lifespan handler and attached to
+`app.state.engine` / `app.state.session_factory`. Routes get a session via
+`Depends(get_session)`. No module-global cache — tests can swap DATABASE_URL
+by building a fresh engine per fixture.
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
+from collections.abc import AsyncIterator
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -14,23 +18,16 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from scryer.config import get_settings
+
+def build_engine(database_url: str) -> AsyncEngine:
+    return create_async_engine(database_url, echo=False, pool_pre_ping=True)
 
 
-@lru_cache(maxsize=1)
-def get_engine() -> AsyncEngine:
-    settings = get_settings()
-    return create_async_engine(
-        settings.database_url,
-        echo=False,
-        pool_pre_ping=True,
-    )
+def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
 
-@lru_cache(maxsize=1)
-def get_session_factory() -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(
-        bind=get_engine(),
-        expire_on_commit=False,
-        class_=AsyncSession,
-    )
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    async with factory() as session:
+        yield session

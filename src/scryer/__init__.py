@@ -3,4 +3,6 @@
 See docs/main design plan for architecture and noun set.
 """
 
-__version__ = "0.0.0"
+from importlib.metadata import version
+
+__version__ = version("scryer")

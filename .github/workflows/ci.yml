@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -35,7 +34,6 @@ jobs:
 
       - name: Type check (mypy)
         run: uv run mypy src
-        continue-on-error: true  # pre-alpha; tighten once schema lands
 
       - name: Tests
         run: uv run pytest -v

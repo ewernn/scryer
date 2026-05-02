@@ -1,18 +1,34 @@
 """FastAPI application factory.
 
-Wires Sentry (no-op if SENTRY_DSN unset), mounts /api/v1 router, leaves
-/mcp and dashboard routes for later phases.
+Wires Sentry (no-op if SENTRY_DSN unset; FastAPI integration auto-attaches),
+attaches DB engine to app.state via lifespan, mounts /api/v1 router. /mcp and
+dashboard routes land in later phases.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 import sentry_sdk
 from fastapi import APIRouter, FastAPI
-from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
 
 from scryer import __version__
 from scryer.config import get_settings
 from scryer.server.api.healthz import router as healthz_router
+from scryer.server.db import build_engine, build_session_factory
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    engine = build_engine(settings.database_url)
+    app.state.engine = engine
+    app.state.session_factory = build_session_factory(engine)
+    try:
+        yield
+    finally:
+        await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -33,10 +49,8 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         redoc_url="/api/redoc",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
-
-    if settings.sentry_dsn:
-        app.add_middleware(SentryAsgiMiddleware)
 
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(healthz_router)
