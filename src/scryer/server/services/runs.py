@@ -29,8 +29,14 @@ async def queue_run(
     task_id: uuid.UUID,
     workspace_id: uuid.UUID,
     project_id: uuid.UUID,
+    supersede: bool = False,
 ) -> Run:
-    """Insert a Run row in `queued` state. Caller invokes `execute_run` next."""
+    """Insert a Run row in `queued` state. Caller invokes `execute_run` next.
+
+    If `supersede=True`, any prior queued/running Runs of the same Task are
+    atomically marked `superseded` (with completed_at set) BEFORE the new Run
+    is inserted. This prevents stale Runs from re-firing when an executor
+    later picks up the queue."""
     task = await session.get(Task, task_id)
     if task is None or task.archived_at is not None:
         raise NotFoundError("task", str(task_id))
@@ -44,7 +50,30 @@ async def queue_run(
         queued_at=datetime.now(UTC),
     )
     session.add(run)
-    await session.flush()
+    await session.flush()  # populate run.id
+
+    if supersede:
+        # CHECK ck_runs_superseded_coherent enforces:
+        # (status='superseded') == (superseded_by_run_id IS NOT NULL).
+        # So we must set both in the same UPDATE.
+        from sqlalchemy import update
+
+        now = datetime.now(UTC)
+        await session.execute(
+            update(Run)
+            .where(
+                Run.task_id == task.id,
+                Run.id != run.id,
+                Run.status.in_((RunStatus.queued, RunStatus.running)),
+            )
+            .values(
+                status=RunStatus.superseded,
+                superseded_by_run_id=run.id,
+                completed_at=now,
+                failure_reason="superseded",
+            )
+        )
+        await session.flush()
     return run
 
 

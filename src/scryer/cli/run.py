@@ -26,11 +26,19 @@ def _need_token(profile: str) -> Profile:
 def start(
     task_id: str = typer.Argument(...),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
+    supersede: bool = typer.Option(
+        False,
+        "--supersede",
+        help="Mark prior queued/running Runs of this Task as superseded.",
+    ),
 ) -> None:
     """Queue a Run for the given Task and execute synchronously."""
     pf = _need_token(profile)
     with client_for(pf) as client:
-        r = client.post("/api/v1/runs", json={"task_id": task_id, "execute_now": True})
+        r = client.post(
+            "/api/v1/runs",
+            json={"task_id": task_id, "execute_now": True, "supersede": supersede},
+        )
     if r.status_code != 200:
         typer.echo(f"{r.status_code} {r.text}", err=True)
         raise typer.Exit(1)

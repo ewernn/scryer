@@ -29,6 +29,7 @@ router = APIRouter(tags=["runs"])
 class RunStartRequest(BaseModel):
     task_id: str
     execute_now: bool = True  # v0: execute synchronously after queueing
+    supersede: bool = False  # mark prior queued/running Runs of this Task as superseded
 
 
 class RunOut(BaseModel):
@@ -87,7 +88,11 @@ async def start(
     proj = await assert_project_access(session, principal, task.project_id)
 
     run = await queue_run(
-        session, task_id=task.id, workspace_id=proj.workspace_id, project_id=proj.id
+        session,
+        task_id=task.id,
+        workspace_id=proj.workspace_id,
+        project_id=proj.id,
+        supersede=body.supersede,
     )
     if body.execute_now:
         run = await execute_run(session, run_id=run.id)
