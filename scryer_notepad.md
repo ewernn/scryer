@@ -175,6 +175,27 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 1.5-1.6 (services + auth middleware) — DONE [2026-05-02 ~03:50 UTC]
+
+- **48/48 tests passing** across users, workspaces, projects, api_keys,
+  service_accounts, invitations, credentials, security
+- 4 critic-flagged critical bugs fixed before tests landed:
+  - Atomic `redeem_invitation` (race-safe via UPDATE WHERE used_at IS NULL)
+  - Cross-workspace `project_grants` validation (must match `inv.workspace_id`)
+  - ServiceAccount keys cannot carry `admin` scope
+  - AES-GCM AAD binds ciphertext to `(cred_id, workspace_id)` — blob swap fails
+- Argon2 verify now catches all `VerificationError` subclasses (no 500 leak)
+- JWT carries `iss=scryer`, `aud=scryer-api`, `leeway=10`
+- Reserved-slugs frozenset blocks `admin`, `api`, `login` etc. ("default" removed
+  since auto-Project flow uses it)
+- RFC 9457 exception handler central + asgi-correlation-id middleware live
+- LIVE on Railway: <https://scryer-production.up.railway.app/api/v1/healthz>
+  returns `{"status":"ok","db_ok":true}`
+- Babysit-agent fixed Railway port mismatch via GraphQL `serviceDomainUpdate`
+- Editable-install footgun resolved via `make sync` target — every `pyproject.toml`
+  change must be followed by `make sync` to refresh the editable .pth
+- `pydantic[email]` added (EmailStr requires validator)
+
 ## Surprises and revisions to plan
 
 **2026-05-02 — sha256 (not bcrypt) for ApiKey/Invitation token hashing.** Plan

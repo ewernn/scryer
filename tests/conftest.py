@@ -37,10 +37,19 @@ from scryer.server.models import Base
 
 
 def _test_database_url() -> str:
-    url = os.environ.get("SCRYER_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError("SCRYER_TEST_DATABASE_URL (or DATABASE_URL) must be set for tests.")
-    return url
+    """Pulls from SCRYER_TEST_DATABASE_URL env var, then falls back to
+    scryer's loaded Settings (which reads .env via pydantic-settings)."""
+    url = os.environ.get("SCRYER_TEST_DATABASE_URL")
+    if url:
+        return url
+    from scryer.config import get_settings
+
+    s = get_settings()
+    if not s.database_url or "scryer:scryer@localhost" in s.database_url:
+        raise RuntimeError(
+            "Set SCRYER_TEST_DATABASE_URL (or have a real DATABASE_URL in .env)."
+        )
+    return s.database_url
 
 
 @pytest_asyncio.fixture(scope="session")

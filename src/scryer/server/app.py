@@ -11,12 +11,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import sentry_sdk
+from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import APIRouter, FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from scryer import __version__
 from scryer.config import get_settings
+from scryer.server.api.auth import router as auth_router
 from scryer.server.api.healthz import router as healthz_router
 from scryer.server.db import build_engine, build_session_factory
+from scryer.server.exception_handlers import (
+    request_validation_handler,
+    scryer_error_handler,
+)
+from scryer.server.services.errors import ScryerError
 
 
 @asynccontextmanager
@@ -52,8 +60,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(CorrelationIdMiddleware, header_name="X-Request-ID")
+    app.add_exception_handler(ScryerError, scryer_error_handler)
+    app.add_exception_handler(RequestValidationError, request_validation_handler)
+
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(healthz_router)
+    api_v1.include_router(auth_router)
     app.include_router(api_v1)
 
     return app
