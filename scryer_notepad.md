@@ -175,6 +175,27 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 3 (Audit + Suite + Tag + Usage) — PARTIAL [2026-05-02 ~08:30 UTC]
+
+- Cluster 3 schema: 11 tables (audit_events, suites, suite_tasks, suite_runs,
+  suite_run_runs, triggers, webhooks, webhook_deliveries, tags, resource_tags,
+  usage_records); migration applied to Neon
+- Total tables now: 37 (14 cluster1 + 12 cluster2 + 11 cluster3)
+- Services done:
+  - audit.py: write_event with auto-redaction of {password, password_hash,
+    encrypted_value, key_hash, token_hash, secret}; list_events with cursor
+    pagination + filters
+  - tags.py: create, list, apply, remove, list_for_resource
+  - suites.py: create + add_task + execute_suite (sequential v0)
+  - usage.py: record_usage + total_cost_for_workspace_since (Budget enforcement
+    helper)
+- API endpoint: GET /workspaces/{slug}/audit (cursor paginated, workspace-scoped)
+- Tests: 7 cluster 3 service tests passing
+- Deferred to Phase 8 (need Cron infra): Trigger dispatcher, Webhook delivery
+  + retry, Budget circuit-breaker enforcement (depends on UsageRecord wiring
+  into Scorer execution)
+- TOTAL TESTS: 90 passing
+
 ## Phase 2.5-2.7 (Eval Core endpoints + CLI + critic fixes) — DONE [2026-05-02 ~07:30 UTC]
 
 - API endpoints: /datasets, /scorers, /tasks, /runs, /runs/{id}/results

@@ -4,6 +4,19 @@ Imports below register all models with `Base.metadata` so Alembic autogenerate
 sees them and so `Base.metadata.create_all()` works in tests.
 """
 
+from scryer.server.models.audit import (  # noqa: F401
+    AuditEvent,
+    ResourceTag,
+    Suite,
+    SuiteRun,
+    SuiteRunRun,
+    SuiteTask,
+    Tag,
+    Trigger,
+    UsageRecord,
+    Webhook,
+    WebhookDelivery,
+)
 from scryer.server.models.auth import (  # noqa: F401
     ApiKey,
     ApiKeyUsage,

@@ -97,3 +97,34 @@ class TraceStorage(StrEnum):
 
     inline = "inline"  # trace_steps table
     r2 = "r2"  # storage_uri populated
+
+
+class ActorKind(StrEnum):
+    """For audit_events.actor_kind discriminator (plus 'cron' / 'system')."""
+
+    user = "user"
+    service_account = "service_account"
+    cron = "cron"
+    system = "system"
+
+
+class TriggerKind(StrEnum):
+    schedule = "schedule"
+    webhook = "webhook"
+
+
+class TriggerTarget(StrEnum):
+    task = "task"
+    suite = "suite"
+
+
+class MissedFirePolicy(StrEnum):
+    skip_to_latest = "skip_to_latest"
+    fire_all = "fire_all"
+
+
+class WebhookDeliveryStatus(StrEnum):
+    pending = "pending"
+    delivered = "delivered"
+    failed = "failed"
+    dead_letter = "dead_letter"

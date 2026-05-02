@@ -17,6 +17,7 @@ from fastapi.exceptions import RequestValidationError
 
 from scryer import __version__
 from scryer.config import get_settings
+from scryer.server.api.audit import router as audit_router
 from scryer.server.api.auth import router as auth_router
 from scryer.server.api.datasets import router as datasets_router
 from scryer.server.api.healthz import router as healthz_router
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(scorers_router)
     api_v1.include_router(tasks_router)
     api_v1.include_router(runs_router)
+    api_v1.include_router(audit_router)
     app.include_router(api_v1)
 
     return app
