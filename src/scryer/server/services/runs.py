@@ -16,7 +16,6 @@ from scryer.server.models.eval import (
     Run,
     Scorer,
     Task,
-    Trace,
 )
 from scryer.server.services.errors import ConflictError, NotFoundError
 from scryer.server.services.sandbox import SandboxError, run_user_code
@@ -54,16 +53,28 @@ async def execute_run(
     *,
     run_id: uuid.UUID,
 ) -> Run:
-    """Synchronous executor: load Task, fetch Records, run Scorer per record,
-    persist Results + Trace. Heartbeat every N records.
+    """Atomic queued→running transition prevents duplicate execution.
 
-    Run transitions: queued → running → done | failed.
+    Heartbeat by wall-clock (every 30s) so slow Scorers don't get reaped
+    by the stale-run sweeper.
     """
-    run = await session.get(Run, run_id)
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    now = datetime.now(UTC)
+    claim = (
+        update(Run)
+        .where(Run.id == run_id, Run.status == RunStatus.queued)
+        .values(status=RunStatus.running, started_at=now, last_heartbeat_at=now)
+        .returning(Run)
+    )
+    run = (await session.execute(claim)).scalar_one_or_none()
     if run is None:
-        raise NotFoundError("run", str(run_id))
-    if run.status != RunStatus.queued:
-        raise ConflictError(f"Run {run_id} is in state {run.status.value}, not queued")
+        existing = await session.get(Run, run_id)
+        if existing is None:
+            raise NotFoundError("run", str(run_id))
+        raise ConflictError(f"Run {run_id} not in queued state ({existing.status.value})")
 
     task = await session.get(Task, run.task_id)
     assert task is not None
@@ -79,15 +90,12 @@ async def execute_run(
             )
         ).scalars()
     )
-
-    run.status = RunStatus.running
-    run.started_at = datetime.now(UTC)
-    run.last_heartbeat_at = datetime.now(UTC)
     run.n_records = len(records)
     await session.flush()
 
     n_done = n_failed = 0
     start_record = (run.resume_cursor or 0) + 1
+    last_heartbeat = now
 
     for rec in records:
         if rec.record_id < start_record:
@@ -103,34 +111,29 @@ async def execute_run(
                 },
             )
             payload = sandbox_result.output
-            score_value = _coerce_score(payload)
             session.add(
                 Result(
                     run_id=run.id,
                     record_id=rec.record_id,
-                    score_value=score_value,
+                    score_value=_coerce_score(payload),
                     score_json=payload,
                     duration_ms=sandbox_result.duration_ms,
                 )
             )
             n_done += 1
         except SandboxError as exc:
-            session.add(
-                Result(
-                    run_id=run.id,
-                    record_id=rec.record_id,
-                    error=str(exc)[:1000],
-                )
-            )
+            session.add(Result(run_id=run.id, record_id=rec.record_id, error=str(exc)[:1000]))
             n_failed += 1
 
         run.resume_cursor = rec.record_id
         run.n_done = n_done
         run.n_failed = n_failed
 
-        # Heartbeat every record (small runs); for big ones reduce frequency
-        if (n_done + n_failed) % 10 == 0:
-            run.last_heartbeat_at = datetime.now(UTC)
+        # Wall-clock heartbeat: every 30s regardless of record count
+        now = datetime.now(UTC)
+        if (now - last_heartbeat) > timedelta(seconds=HEARTBEAT_INTERVAL_S):
+            run.last_heartbeat_at = now
+            last_heartbeat = now
             await session.flush()
 
     run.status = RunStatus.failed if n_failed and not n_done else RunStatus.done
@@ -138,17 +141,6 @@ async def execute_run(
         run.failure_reason = f"All {n_failed} records failed"
     run.completed_at = datetime.now(UTC)
     run.last_heartbeat_at = run.completed_at
-
-    # Always create one Trace per Run for the whole-run summary;
-    # per-record Traces land in Phase 2.5 if/when agents need step-level capture
-    session.add(
-        Trace(
-            run_id=run.id,
-            record_id=0,
-            n_steps=0,
-        )
-    )
-
     await session.flush()
     return run
 

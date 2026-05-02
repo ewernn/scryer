@@ -56,23 +56,34 @@ def _setrlimits(memory_mb: int, cpu_s: int) -> None:
 
 
 _RUNNER = textwrap.dedent("""
-    import json, sys, traceback
+    import json, os, sys, traceback
+    # Redirect stdout so user prints / library noise can't corrupt envelope.
+    # Envelope written to the file path passed in argv[1].
+    envelope_path = sys.argv[1]
+    sys.stdout = sys.stderr
     src = sys.stdin.readline()
     payload_line = sys.stdin.readline()
-    src_text = json.loads(src)["source"]
-    entry = json.loads(src)["entry"]
+    meta = json.loads(src)
+    src_text = meta["source"]
+    entry = meta["entry"]
     payload = json.loads(payload_line)
     try:
         ns: dict = {}
         exec(src_text, ns)
         if entry not in ns:
             raise NameError(f"entry {entry!r} not defined in source")
-        result = ns[entry](**payload)
-        sys.stdout.write(json.dumps({"ok": True, "result": result}))
+        fn = ns[entry]
+        try:
+            result = fn(**payload)
+        except TypeError as exc:
+            raise TypeError(
+                f"{entry}{tuple(payload.keys())} signature mismatch: {exc}"
+            ) from exc
+        envelope = {"ok": True, "result": result}
     except Exception as exc:
-        sys.stdout.write(json.dumps({
-            "ok": False, "error": str(exc), "trace": traceback.format_exc()
-        }))
+        envelope = {"ok": False, "error": str(exc), "trace": traceback.format_exc()}
+    with open(envelope_path, "w") as f:
+        f.write(json.dumps(envelope))
 """)
 
 
@@ -100,11 +111,13 @@ async def run_user_code(
     if env:
         sub_env.update(env)
 
+    envelope_path = workdir / "envelope.json"
     start = asyncio.get_event_loop().time()
     try:
         proc = await asyncio.create_subprocess_exec(
             "python3",
             str(runner_path),
+            str(envelope_path),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -116,13 +129,15 @@ async def run_user_code(
             json.dumps({"source": source, "entry": entry}) + "\n" + json.dumps(payload) + "\n"
         ).encode("utf-8")
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
+            _stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(stdin_blob), timeout=timeout_s
             )
         except TimeoutError as exc:
             proc.kill()
             await proc.wait()
             raise SandboxError(f"User code exceeded timeout {timeout_s}s") from exc
+
+        envelope_bytes = envelope_path.read_bytes() if envelope_path.exists() else b""
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
@@ -132,10 +147,13 @@ async def run_user_code(
     if proc.returncode != 0:
         raise SandboxError(f"User code exited {proc.returncode}: {stderr_str[:500]}")
 
+    if not envelope_bytes:
+        raise SandboxError(f"User code wrote no envelope (stderr: {stderr_str[:500]})")
+
     try:
-        envelope = json.loads(stdout_b.decode("utf-8"))
+        envelope = json.loads(envelope_bytes.decode("utf-8"))
     except json.JSONDecodeError as exc:
-        raise SandboxError(f"User code stdout not valid JSON: {exc}") from exc
+        raise SandboxError(f"User code envelope not valid JSON: {exc}") from exc
 
     if not envelope.get("ok"):
         raise SandboxError(f"User code raised: {envelope.get('error')}")

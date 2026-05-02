@@ -175,6 +175,26 @@ NAMING_CONVENTION = {
 
 ---
 
+## Phase 2.5-2.7 (Eval Core endpoints + CLI + critic fixes) — DONE [2026-05-02 ~07:30 UTC]
+
+- API endpoints: /datasets, /scorers, /tasks, /runs, /runs/{id}/results
+  (all under /workspaces/{ws}/projects/{p}); authz via get_project_by_slug_path
+- CLI: `scryer dataset push|list|get`, `scryer scorer push|list`,
+  `scryer run start|get|results` — all with --output table|json
+- Critic-pass fixes (Phase 2 critic flagged 5 critical):
+  - Sandbox stdout pollution → JSON envelope written to side-channel file
+    (workdir/envelope.json), not stdout. User prints can't corrupt.
+  - Run `queued→running` race fixed via atomic UPDATE WHERE status='queued'
+    RETURNING. Second concurrent execute_run gets ConflictError.
+  - Heartbeat is wall-clock (every 30s) not record-count, so slow Scorers
+    aren't reaped.
+  - Scorer signature mismatch surfaces "signature mismatch" error.
+  - content_hash drops `default=str` — fail-fast on non-JSON-native inputs.
+- Stale Trace stub at record_id=0 dropped (premature; per-record Traces
+  land in Phase 3 if/when agent step capture matters)
+- 5 new regression tests for the critic findings + 2 endpoint integration
+- TOTAL TESTS: 83 passing
+
 ## Phase 2.1-2.4 (Eval Core schema + services + Run executor) — DONE [2026-05-02 ~06:30 UTC]
 
 - Cluster 2: 12 tables (datasets, dataset_records, scorers, agents, tools,

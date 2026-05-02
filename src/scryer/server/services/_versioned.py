@@ -18,8 +18,12 @@ T = TypeVar("T", bound=Base)
 
 
 def content_hash(payload: dict[str, Any]) -> str:
-    """sha256 hex of canonical-JSON-encoded payload. Sorted keys → deterministic."""
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    """sha256 hex of canonical-JSON-encoded payload. Sorted keys → deterministic.
+
+    Fail-fast on non-JSON-native values: a callable / object with unstable
+    repr would silently break determinism otherwise.
+    """
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
