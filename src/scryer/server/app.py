@@ -19,6 +19,8 @@ from scryer import __version__
 from scryer.config import get_settings
 from scryer.server.api.auth import router as auth_router
 from scryer.server.api.healthz import router as healthz_router
+from scryer.server.api.projects import router as projects_router
+from scryer.server.api.workspaces import router as workspaces_router
 from scryer.server.db import build_engine, build_session_factory
 from scryer.server.exception_handlers import (
     request_validation_handler,
@@ -67,6 +69,8 @@ def create_app() -> FastAPI:
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(healthz_router)
     api_v1.include_router(auth_router)
+    api_v1.include_router(workspaces_router)
+    api_v1.include_router(projects_router)
     app.include_router(api_v1)
 
     return app

@@ -17,9 +17,23 @@ from scryer.server.services.errors import ConflictError, NotFoundError
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 _RESERVED_SLUGS = frozenset(
     {
-        "admin", "api", "app", "www", "internal", "static", "assets",
-        "auth", "login", "logout", "signup", "billing", "settings",
-        "system", "scryer", "public", "docs",
+        "admin",
+        "api",
+        "app",
+        "www",
+        "internal",
+        "static",
+        "assets",
+        "auth",
+        "login",
+        "logout",
+        "signup",
+        "billing",
+        "settings",
+        "system",
+        "scryer",
+        "public",
+        "docs",
     }
 )
 

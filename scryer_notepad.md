@@ -175,7 +175,24 @@ NAMING_CONVENTION = {
 
 ---
 
-## Phase 1.5-1.6 (services + auth middleware) — DONE [2026-05-02 ~03:50 UTC]
+## Phase 1.9 (CLI + workspace/project endpoints) — DONE [2026-05-02 ~04:30 UTC]
+
+- `scryer auth login | logout | whoami` working against live Railway
+- `scryer workspace list | get` working
+- `scryer project list -w <ws>` working
+- HTTP endpoints: `/api/v1/auth/{login,me}`, `/api/v1/workspaces`, `/api/v1/workspaces/{slug}/projects`
+- Integration tests: 5 new HTTP-shape tests (login round-trip, 401 problem,
+  workspace+project list, 404 problem)
+- `client` fixture refactored: HTTP tests use independent sessions on the
+  test engine (savepoint sharing across async contexts hit `MissingGreenlet`)
+- `http_session` fixture for setup data; commits go to schema-isolated test
+  namespace; cleaned up by DROP SCHEMA at session end
+- Login endpoint now uses typed AuthError → central RFC 9457 handler
+- `pyproject.toml` script entry: `scryer = "scryer.cli.main:main"`
+- platformdirs → `~/.config/scryer/credentials.json` (chmod 600); multi-profile
+- TOTAL TESTS: 53 passing (48 unit + 5 integration)
+
+## Phase 1.5-1.8 (services + auth middleware) — DONE [2026-05-02 ~03:50 UTC]
 
 - **48/48 tests passing** across users, workspaces, projects, api_keys,
   service_accounts, invitations, credentials, security

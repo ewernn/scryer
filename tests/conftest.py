@@ -46,9 +46,7 @@ def _test_database_url() -> str:
 
     s = get_settings()
     if not s.database_url or "scryer:scryer@localhost" in s.database_url:
-        raise RuntimeError(
-            "Set SCRYER_TEST_DATABASE_URL (or have a real DATABASE_URL in .env)."
-        )
+        raise RuntimeError("Set SCRYER_TEST_DATABASE_URL (or have a real DATABASE_URL in .env).")
     return s.database_url
 
 
@@ -118,17 +116,29 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
-async def client(session: AsyncSession) -> AsyncIterator[AsyncClient]:
-    """ASGI test client whose `Depends(get_session)` is overridden to share the
-    test's transactional session — endpoint writes are visible in test
-    assertions and roll back on teardown.
-    """
+async def http_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """Independent session for HTTP integration tests. Real commits to the
+    test schema; cleaned up by DROP SCHEMA at session teardown. Unique IDs
+    per test (uuid4) prevent cross-test collisions."""
+    async with AsyncSession(bind=engine, expire_on_commit=False) as s:
+        yield s
+
+
+@pytest_asyncio.fixture
+async def client(
+    engine: AsyncEngine, http_session: AsyncSession
+) -> AsyncIterator[AsyncClient]:
+    """ASGI test client. Each request gets its own session against the test
+    engine; commits go to the schema-isolated test namespace and are wiped
+    at session end."""
     app = create_app()
 
     async def _override() -> AsyncIterator[AsyncSession]:
-        yield session
+        async with AsyncSession(bind=engine, expire_on_commit=False) as s:
+            yield s
 
     app.dependency_overrides[get_session] = _override
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.pop(get_session, None)

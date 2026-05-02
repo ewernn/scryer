@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
-from scryer.server.services.errors import AuthError
 from scryer.server.services.security import issue_access_jwt
 from scryer.server.services.users import authenticate
 
@@ -44,11 +43,8 @@ async def login(
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> LoginResponse:
-    try:
-        user = await authenticate(session, email=body.email, password=body.password)
-    except AuthError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
-    await session.commit()  # persist any password rehash
+    user = await authenticate(session, email=body.email, password=body.password)
+    await session.commit()
     from scryer.config import get_settings
 
     s = get_settings()

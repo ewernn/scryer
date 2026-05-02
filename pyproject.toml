@@ -51,7 +51,7 @@ dev = [
 ]
 
 [project.scripts]
-scryer = "scryer.cli:main"
+scryer = "scryer.cli.main:main"
 
 [build-system]
 requires = ["hatchling"]
