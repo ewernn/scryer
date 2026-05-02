@@ -212,9 +212,13 @@ async def reap_stale_runs(
 ) -> int:
     """Mark Runs `failed` whose heartbeat is older than 2x interval. Called
     by a Cron in production. Returns count reaped."""
-    stmt = select(Run).where(
-        Run.status == RunStatus.running,
-        Run.last_heartbeat_at < _now_minus(timeout_seconds),
+    stmt = (
+        select(Run)
+        .where(
+            Run.status == RunStatus.running,
+            Run.last_heartbeat_at < _now_minus(timeout_seconds),
+        )
+        .with_for_update(skip_locked=True)
     )
     rows = list((await session.execute(stmt)).scalars())
     for r in rows:

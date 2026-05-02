@@ -32,7 +32,9 @@
 {% endif %}
 
 <section class="mb-8">
-  <h2 class="text-sm uppercase font-semibold text-zinc-500 mb-2">Results ({{ results|length }})</h2>
+  <h2 class="text-sm uppercase font-semibold text-zinc-500 mb-2">
+    Results ({{ total_records }} total · page {{ page }} of {{ total_pages }})
+  </h2>
   <table class="w-full text-sm bg-white border border-zinc-200 rounded">
     <thead class="bg-zinc-50 text-zinc-500 uppercase text-xs">
       <tr>
@@ -55,6 +57,18 @@
       {% endfor %}
     </tbody>
   </table>
+  {% if total_pages > 1 %}
+    <div class="flex gap-3 mt-3 text-sm">
+      {% if page > 1 %}
+        <a href="?page={{ page - 1 }}&per_page={{ per_page }}"
+           class="px-3 py-1 border border-zinc-200 rounded hover:bg-zinc-100">prev</a>
+      {% endif %}
+      {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}&per_page={{ per_page }}"
+           class="px-3 py-1 border border-zinc-200 rounded hover:bg-zinc-100">next</a>
+      {% endif %}
+    </div>
+  {% endif %}
 </section>
 
 <section>

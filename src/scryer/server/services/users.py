@@ -18,6 +18,7 @@ from scryer.server.services.errors import (
 from scryer.server.services.security import (
     hash_password,
     password_needs_rehash,
+    verify_dummy_password,
     verify_password,
 )
 
@@ -76,6 +77,7 @@ async def authenticate(session: AsyncSession, *, email: str, password: str) -> U
     try:
         user = await get_user_by_email(session, email)
     except NotFoundError as exc:
+        await verify_dummy_password(password)
         raise AuthError("Invalid email or password") from exc
 
     if not await verify_password(user.password_hash, password):

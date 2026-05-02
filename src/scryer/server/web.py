@@ -9,13 +9,14 @@ Cookie `secure` flag is env-driven so local dev over plain HTTP works.
 
 from __future__ import annotations
 
+import math
 import os
 import uuid
 from pathlib import Path
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,9 +77,8 @@ async def login_submit(
     from scryer.server.services.errors import PermissionError as ScryerPermErr
 
     client_host = request.client.host if request.client else "unknown"
-    rate_key = f"{email}|{client_host}"
     try:
-        check_login_rate(rate_key)
+        check_login_rate(email=email, ip=client_host)
         user = await authenticate(session, email=email, password=password)
     except (AuthError, ScryerPermErr) as exc:
         return templates.TemplateResponse(
@@ -154,6 +154,8 @@ async def run_page(
     run_id: str,
     user_id: Annotated[uuid.UUID, Depends(_require_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> HTMLResponse:
     from scryer.server.auth import Principal
     from scryer.server.services.access import assert_project_access
@@ -162,14 +164,23 @@ async def run_page(
     rid = uuid.UUID(run_id)
     run = await get_run(session, rid)
     # IDOR fix: principal must have access to the project this Run belongs to
-    principal = Principal(
-        id=user_id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read})
-    )
+    principal = Principal(id=user_id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read}))
     await assert_project_access(session, principal, run.project_id)
-    results = await list_results(session, rid)
+    offset = (page - 1) * per_page
+    results = await list_results(session, rid, limit=per_page, offset=offset)
+    total_records = run.n_records or 0
+    total_pages = max(1, math.ceil(total_records / per_page)) if total_records else 1
     comments = await list_comments_for_resource(session, resource_type="run", resource_id=rid)
     return templates.TemplateResponse(
         request,
         "run.html",
-        {"run": run, "results": results, "comments": comments},
+        {
+            "run": run,
+            "results": results,
+            "comments": comments,
+            "page": page,
+            "per_page": per_page,
+            "total_pages": total_pages,
+            "total_records": total_records,
+        },
     )

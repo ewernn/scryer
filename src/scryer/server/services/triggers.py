@@ -15,12 +15,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.models.audit import Trigger
+from scryer.server.models.auth import Project
 from scryer.server.models.enums import (
     MissedFirePolicy,
     TriggerKind,
     TriggerTarget,
 )
-from scryer.server.models.auth import Project
 from scryer.server.models.eval import Run, Task
 from scryer.server.services.errors import (
     ConflictError,

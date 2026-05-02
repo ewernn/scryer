@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,12 +40,14 @@ class MeResponse(BaseModel):
     summary="Exchange email + password for an access JWT",
 )
 async def login(
+    request: Request,
     body: LoginRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> LoginResponse:
     from scryer.server.services.rate_limit import check_login_rate
 
-    check_login_rate(body.email)
+    client_host = request.client.host if request.client else "unknown"
+    check_login_rate(email=body.email, ip=client_host)
     user = await authenticate(session, email=body.email, password=body.password)
     await session.commit()
     from scryer.config import get_settings

@@ -31,6 +31,10 @@ _PH = PasswordHasher(
     salt_len=16,
 )
 
+# Generated once at module load. Used to equalize login latency on the
+# user-not-found path so attackers can't probe valid emails by timing.
+_DUMMY_HASH = _PH.hash("__dummy_password_for_timing_equalization__")
+
 
 # ─── Password hashing (argon2id) ─────────────────────────────────────────────
 
@@ -47,6 +51,12 @@ async def verify_password(stored_hash: str, plaintext: str) -> bool:
         return await asyncio.to_thread(_PH.verify, stored_hash, plaintext)
     except (VerifyMismatchError, InvalidHash, VerificationError):
         return False
+
+
+async def verify_dummy_password(plaintext: str) -> None:
+    """Run argon2 verify against a dummy hash to equalize login latency.
+    Used on user-not-found paths to defeat timing-based email enumeration."""
+    await verify_password(_DUMMY_HASH, plaintext)
 
 
 async def password_needs_rehash(stored_hash: str) -> bool:

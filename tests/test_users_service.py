@@ -62,6 +62,22 @@ async def test_authenticate_unknown_email_raises(session: AsyncSession) -> None:
         )
 
 
+async def test_authenticate_unknown_email_runs_dummy_verify(session: AsyncSession) -> None:
+    """Timing equalization: unknown-email path must still pay the argon2 cost
+    so attackers can't enumerate emails by measuring response time."""
+    import time
+
+    t0 = time.monotonic()
+    with pytest.raises(AuthError):
+        await authenticate(
+            session, email=f"nope{uuid4().hex[:8]}@example.com", password="anything-here-xx"
+        )
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    # Argon2 with OWASP params runs ~50ms; floor at 10ms catches a regression
+    # that removes the dummy verify (which would drop to <1ms).
+    assert elapsed_ms > 10, f"unknown-email path ran in {elapsed_ms:.1f}ms, missing dummy verify"
+
+
 async def test_password_needs_rehash_flow(session: AsyncSession) -> None:
     h = await hash_password("a-strong-pass-1")
     assert await password_needs_rehash(h) is False

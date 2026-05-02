@@ -31,6 +31,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -265,7 +266,14 @@ class Run(Base, TimestampMixin):
 
 class Result(Base):
     __tablename__ = "results"
-    __table_args__ = (Index("ix_results_run_id_score_value", "run_id", "score_value"),)
+    __table_args__ = (
+        Index(
+            "ix_results_run_id_record_id",
+            "run_id",
+            "record_id",
+            postgresql_where=text("invalidated_at IS NULL"),
+        ),
+    )
 
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True

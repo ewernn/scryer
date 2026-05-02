@@ -168,7 +168,7 @@ def _schedule_retry(d: WebhookDelivery, now: datetime) -> None:
         d.next_attempt_at = None
     else:
         d.status = WebhookDeliveryStatus.failed
-        d.next_attempt_at = now + timedelta(seconds=_BACKOFF_SECONDS[d.attempts + 1])
+        d.next_attempt_at = now + timedelta(seconds=_BACKOFF_SECONDS[d.attempts])
 
 
 async def manual_retry(session: AsyncSession, delivery_id: int) -> WebhookDelivery:
