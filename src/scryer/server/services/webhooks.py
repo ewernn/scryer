@@ -161,9 +161,10 @@ async def deliver_pending(
         ).scalars()
     )
 
+    lease_until = now + timedelta(seconds=_LEASE_SECONDS)
     async with httpx.AsyncClient(timeout=_DELIVERY_TIMEOUT_S) as client:
         for d in rows:
-            await _attempt_delivery(session, client, d, counts, now)
+            await _attempt_delivery(session, client, d, counts, now, lease_until)
     await session.flush()
     return counts
 
@@ -203,6 +204,7 @@ async def _attempt_delivery(
     d: WebhookDelivery,
     counts: dict[str, int],
     now: datetime,
+    lease_until: datetime,
 ) -> None:
     wh = await session.get(Webhook, d.webhook_id)
     if wh is None or not wh.is_active:
@@ -237,7 +239,7 @@ async def _attempt_delivery(
             d.next_attempt_at = None
             counts["delivered"] += 1
         else:
-            _schedule_retry(d, now)
+            _schedule_retry(d, now, lease_floor=lease_until)
             counts["failed" if d.status == WebhookDeliveryStatus.failed else "dead_letter"] += 1
     except httpx.HTTPError as exc:
         d.last_response_body = str(exc)[:1000]
@@ -246,13 +248,22 @@ async def _attempt_delivery(
     d.attempts += 1
 
 
-def _schedule_retry(d: WebhookDelivery, now: datetime) -> None:
+def _schedule_retry(
+    d: WebhookDelivery, now: datetime, *, lease_floor: datetime | None = None
+) -> None:
+    """Schedule next retry. `lease_floor`, if given, prevents the retry from
+    being scheduled before the current lease expires — otherwise a concurrent
+    worker could re-pick the row immediately, processing the same delivery
+    multiple times."""
     if d.attempts + 1 >= _MAX_ATTEMPTS:
         d.status = WebhookDeliveryStatus.dead_letter
         d.next_attempt_at = None
-    else:
-        d.status = WebhookDeliveryStatus.failed
-        d.next_attempt_at = now + timedelta(seconds=_BACKOFF_SECONDS[d.attempts])
+        return
+    d.status = WebhookDeliveryStatus.failed
+    retry_at = now + timedelta(seconds=_BACKOFF_SECONDS[d.attempts])
+    if lease_floor is not None and retry_at < lease_floor:
+        retry_at = lease_floor
+    d.next_attempt_at = retry_at
 
 
 async def manual_retry(session: AsyncSession, delivery_id: int) -> WebhookDelivery:
