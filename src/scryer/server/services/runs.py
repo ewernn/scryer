@@ -162,6 +162,28 @@ async def execute_run(
             "n_failed": n_failed,
         },
     )
+
+    # Plan §15: queue webhook deliveries for any subscribers in this workspace.
+    # fire_event just inserts WebhookDelivery rows; deliver_pending Cron does
+    # the actual HTTP work asynchronously.
+    from scryer.server.services.webhooks import fire_event
+
+    await fire_event(
+        session,
+        workspace_id=run.workspace_id,
+        event_type=f"run.{run.status.value}",
+        payload={
+            "run_id": str(run.id),
+            "task_id": str(run.task_id),
+            "project_id": str(run.project_id),
+            "workspace_id": str(run.workspace_id),
+            "status": run.status.value,
+            "n_records": run.n_records,
+            "n_done": n_done,
+            "n_failed": n_failed,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        },
+    )
     return run
 
 

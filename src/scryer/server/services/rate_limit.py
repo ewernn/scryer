@@ -18,7 +18,11 @@ from collections import defaultdict, deque
 from scryer.server.services.errors import PermissionError
 
 _WINDOW_SECONDS = 60
-_MAX_ATTEMPTS = 5
+_EMAIL_CAP = 5
+# IPs can be shared across many real users (CGNAT, corporate NAT, mobile
+# carriers) so this cap is intentionally an order of magnitude looser than
+# the email cap.
+_IP_CAP = 50
 _EVICTION_THRESHOLD = 5_000
 
 _attempts: dict[str, deque[float]] = defaultdict(deque)
@@ -26,21 +30,22 @@ _lock = threading.Lock()
 
 
 def check_login_rate(*, email: str, ip: str) -> None:
-    """Raises PermissionError if either email or ip has hit the cap (5/60s).
-
-    Records an attempt against both keys only after both pass — blocked IPs
-    don't burn email attempts and vice versa.
-    """
+    """Raises PermissionError if email or IP has hit its cap (sliding window,
+    60s). Email and IP caps are checked independently; both must pass to record
+    an attempt — blocked IPs don't burn email attempts and vice versa."""
     now = time.monotonic()
-    keys = (f"email:{email}", f"ip:{ip}")
+    checks = (
+        (f"email:{email}", _EMAIL_CAP),
+        (f"ip:{ip}", _IP_CAP),
+    )
     with _lock:
-        for key in keys:
+        for key, cap in checks:
             window = _attempts[key]
             while window and window[0] < now - _WINDOW_SECONDS:
                 window.popleft()
-            if len(window) >= _MAX_ATTEMPTS:
+            if len(window) >= cap:
                 raise PermissionError(f"Too many login attempts; try again in {_WINDOW_SECONDS}s")
-        for key in keys:
+        for key, _cap in checks:
             _attempts[key].append(now)
         if len(_attempts) > _EVICTION_THRESHOLD:
             _evict_dead_keys_locked()
@@ -51,3 +56,9 @@ def _evict_dead_keys_locked() -> None:
     dead = [k for k, v in _attempts.items() if not v]
     for k in dead:
         del _attempts[k]
+
+
+def _reset_for_tests() -> None:
+    """Clear all counters. Called from test fixtures only."""
+    with _lock:
+        _attempts.clear()

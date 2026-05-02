@@ -31,6 +31,9 @@ from scryer.server.services.errors import NotFoundError, ValidationError
 _BACKOFF_SECONDS = [1, 10, 100, 1000]
 _MAX_ATTEMPTS = len(_BACKOFF_SECONDS)
 _DELIVERY_TIMEOUT_S = 10
+# Lease window: how long a claimed-but-not-yet-attempted delivery is hidden
+# from other workers. Must exceed worst-case in-flight batch HTTP time.
+_LEASE_SECONDS = 120
 
 
 async def create_webhook(
@@ -51,6 +54,44 @@ async def create_webhook(
         event_types=event_types,
     )
     session.add(wh)
+    await session.flush()
+    return wh
+
+
+async def list_webhooks(session: AsyncSession, *, workspace_id: uuid.UUID) -> list[Webhook]:
+    rows = await session.execute(
+        select(Webhook).where(Webhook.workspace_id == workspace_id).order_by(Webhook.id)
+    )
+    return list(rows.scalars())
+
+
+async def get_webhook(
+    session: AsyncSession, webhook_id: uuid.UUID, *, workspace_id: uuid.UUID
+) -> Webhook:
+    """Returns the Webhook iff it exists AND belongs to `workspace_id`. The
+    workspace_id guard is the real authz boundary — caller must have already
+    asserted the principal is a member of that workspace."""
+    wh = await session.get(Webhook, webhook_id)
+    if wh is None or wh.workspace_id != workspace_id:
+        raise NotFoundError("webhook", str(webhook_id))
+    return wh
+
+
+async def delete_webhook(
+    session: AsyncSession, webhook_id: uuid.UUID, *, workspace_id: uuid.UUID
+) -> None:
+    wh = await get_webhook(session, webhook_id, workspace_id=workspace_id)
+    await session.delete(wh)
+    await session.flush()
+
+
+async def rotate_webhook_secret(
+    session: AsyncSession, webhook_id: uuid.UUID, *, workspace_id: uuid.UUID
+) -> Webhook:
+    """Generate a fresh HMAC secret and return the Webhook. The new secret is
+    on the returned object — caller must surface it ONCE to the client."""
+    wh = await get_webhook(session, webhook_id, workspace_id=workspace_id)
+    wh.secret = uuid.uuid4().hex
     await session.flush()
     return wh
 
@@ -97,9 +138,40 @@ async def fire_event(
 async def deliver_pending(
     session: AsyncSession, *, now: datetime | None = None, limit: int = 100
 ) -> dict[str, int]:
-    """Cron-driven worker: pick up to `limit` pending/failed deliveries whose
-    next_attempt_at has passed; HTTP-POST each; update status."""
+    """Cron-driven worker: claim a batch via SKIP LOCKED + lease, release the
+    lock, then HTTP-POST each.
+
+    Lease pattern: under FOR UPDATE we bump `next_attempt_at` forward by
+    _LEASE_SECONDS, then COMMIT (releasing the row locks). Other workers see
+    the leased rows as "not yet ready" via the existing `next_attempt_at <= now`
+    filter. If this worker crashes, the lease expires and another worker
+    picks the row up. This avoids holding row locks across slow HTTP I/O."""
     now = now or datetime.now(UTC)
+    claimed_ids = await _claim_lease_batch(session, now=now, limit=limit)
+    counts = {"delivered": 0, "failed": 0, "dead_letter": 0}
+    if not claimed_ids:
+        return counts
+
+    # Re-load the leased rows in this same session — no FOR UPDATE this time.
+    rows = list(
+        (
+            await session.execute(
+                select(WebhookDelivery).where(WebhookDelivery.id.in_(claimed_ids))
+            )
+        ).scalars()
+    )
+
+    async with httpx.AsyncClient(timeout=_DELIVERY_TIMEOUT_S) as client:
+        for d in rows:
+            await _attempt_delivery(session, client, d, counts, now)
+    await session.flush()
+    return counts
+
+
+async def _claim_lease_batch(session: AsyncSession, *, now: datetime, limit: int) -> list[int]:
+    """Claim up to `limit` due rows. Bumps next_attempt_at by _LEASE_SECONDS
+    so they're invisible to other workers until either we update them with
+    a final status or the lease expires."""
     rows = list(
         (
             await session.execute(
@@ -116,50 +188,62 @@ async def deliver_pending(
             )
         ).scalars()
     )
-    counts = {"delivered": 0, "failed": 0, "dead_letter": 0}
-    async with httpx.AsyncClient(timeout=_DELIVERY_TIMEOUT_S) as client:
-        for d in rows:
-            wh = await session.get(Webhook, d.webhook_id)
-            if wh is None or not wh.is_active:
-                d.status = WebhookDeliveryStatus.dead_letter
-                counts["dead_letter"] += 1
-                continue
-            try:
-                _check_url_at_fire_time(wh.url)
-            except ValidationError:
-                d.status = WebhookDeliveryStatus.dead_letter
-                counts["dead_letter"] += 1
-                continue
+    lease_until = now + timedelta(seconds=_LEASE_SECONDS)
+    ids: list[int] = []
+    for d in rows:
+        d.next_attempt_at = lease_until
+        ids.append(d.id)
+    await session.commit()  # releases row locks; lease now protects the batch
+    return ids
 
-            payload_bytes = json.dumps(d.payload_json, sort_keys=True).encode("utf-8")
-            sig = hmac.new(wh.secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
-            try:
-                resp = await client.post(
-                    wh.url,
-                    content=payload_bytes,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Scryer-Signature": sig,
-                        "X-Scryer-Event-Type": d.event_type,
-                    },
-                )
-                d.last_response_status = resp.status_code
-                d.last_response_body = resp.text[:1000]
-                if 200 <= resp.status_code < 300:
-                    d.status = WebhookDeliveryStatus.delivered
-                    counts["delivered"] += 1
-                else:
-                    _schedule_retry(d, now)
-                    counts[
-                        "failed" if d.status == WebhookDeliveryStatus.failed else "dead_letter"
-                    ] += 1
-            except httpx.HTTPError as exc:
-                d.last_response_body = str(exc)[:1000]
-                _schedule_retry(d, now)
-                counts["failed" if d.status == WebhookDeliveryStatus.failed else "dead_letter"] += 1
-            d.attempts += 1
-    await session.flush()
-    return counts
+
+async def _attempt_delivery(
+    session: AsyncSession,
+    client: httpx.AsyncClient,
+    d: WebhookDelivery,
+    counts: dict[str, int],
+    now: datetime,
+) -> None:
+    wh = await session.get(Webhook, d.webhook_id)
+    if wh is None or not wh.is_active:
+        d.status = WebhookDeliveryStatus.dead_letter
+        d.next_attempt_at = None
+        counts["dead_letter"] += 1
+        return
+    try:
+        _check_url_at_fire_time(wh.url)
+    except ValidationError:
+        d.status = WebhookDeliveryStatus.dead_letter
+        d.next_attempt_at = None
+        counts["dead_letter"] += 1
+        return
+
+    payload_bytes = json.dumps(d.payload_json, sort_keys=True).encode("utf-8")
+    sig = hmac.new(wh.secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+    try:
+        resp = await client.post(
+            wh.url,
+            content=payload_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "X-Scryer-Signature": sig,
+                "X-Scryer-Event-Type": d.event_type,
+            },
+        )
+        d.last_response_status = resp.status_code
+        d.last_response_body = resp.text[:1000]
+        if 200 <= resp.status_code < 300:
+            d.status = WebhookDeliveryStatus.delivered
+            d.next_attempt_at = None
+            counts["delivered"] += 1
+        else:
+            _schedule_retry(d, now)
+            counts["failed" if d.status == WebhookDeliveryStatus.failed else "dead_letter"] += 1
+    except httpx.HTTPError as exc:
+        d.last_response_body = str(exc)[:1000]
+        _schedule_retry(d, now)
+        counts["failed" if d.status == WebhookDeliveryStatus.failed else "dead_letter"] += 1
+    d.attempts += 1
 
 
 def _schedule_retry(d: WebhookDelivery, now: datetime) -> None:

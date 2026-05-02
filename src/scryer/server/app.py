@@ -27,6 +27,7 @@ from scryer.server.api.projects import router as projects_router
 from scryer.server.api.runs import router as runs_router
 from scryer.server.api.scorers import router as scorers_router
 from scryer.server.api.tasks import router as tasks_router
+from scryer.server.api.webhooks import router as webhooks_router
 from scryer.server.api.workspaces import router as workspaces_router
 from scryer.server.db import build_engine, build_session_factory
 from scryer.server.exception_handlers import (
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(tasks_router)
     api_v1.include_router(runs_router)
     api_v1.include_router(audit_router)
+    api_v1.include_router(webhooks_router)
     app.include_router(api_v1)
     app.include_router(internal_router)  # /internal/* — Cron only
 

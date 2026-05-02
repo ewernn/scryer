@@ -15,8 +15,16 @@ from scryer.server.models.auth import (
     Workspace,
     WorkspaceMember,
 )
-from scryer.server.models.enums import PrincipalKind, ProjectVisibility
+from scryer.server.models.enums import PrincipalKind, ProjectVisibility, WorkspaceRole
 from scryer.server.services.errors import NotFoundError, PermissionError
+
+# WorkspaceRole rank — higher number = more authority. Used by
+# assert_workspace_role to compare a member's role against a required minimum.
+_ROLE_RANK = {
+    WorkspaceRole.viewer: 0,
+    WorkspaceRole.member: 1,
+    WorkspaceRole.owner: 2,
+}
 
 
 async def assert_workspace_member(
@@ -35,6 +43,37 @@ async def assert_workspace_member(
     )
     if row.scalar_one_or_none() is None:
         raise NotFoundError("workspace", str(workspace_id))
+
+
+async def assert_workspace_role(
+    session: AsyncSession,
+    principal: Principal,
+    workspace_id: uuid.UUID,
+    *,
+    min_role: WorkspaceRole,
+) -> WorkspaceMember:
+    """Like assert_workspace_member, but also requires the member's role to be
+    at least `min_role` (viewer < member < owner). Returns the member row.
+
+    Membership-not-found raises NotFoundError (no oracle); insufficient role
+    raises PermissionError (the principal IS in the workspace, just lacks
+    privilege — masking that as "not found" would be confusing)."""
+    if principal.kind != PrincipalKind.user:
+        raise PermissionError("ServiceAccount workspace access not yet supported")
+    row = await session.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == principal.id,
+        )
+    )
+    member = row.scalar_one_or_none()
+    if member is None:
+        raise NotFoundError("workspace", str(workspace_id))
+    if _ROLE_RANK[member.role] < _ROLE_RANK[min_role]:
+        raise PermissionError(
+            f"Requires workspace role {min_role.value!r} (have {member.role.value!r})"
+        )
+    return member
 
 
 async def assert_project_access(

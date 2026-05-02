@@ -128,7 +128,11 @@ async def http_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 async def client(engine: AsyncEngine, http_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     """ASGI test client. Each request gets its own session against the test
     engine; commits go to the schema-isolated test namespace and are wiped
-    at session end."""
+    at session end. Resets the in-process rate limiter per test so unrelated
+    tests don't blow each other's IP cap from the shared `testclient` host."""
+    from scryer.server.services.rate_limit import _reset_for_tests
+
+    _reset_for_tests()
     app = create_app()
 
     async def _override() -> AsyncIterator[AsyncSession]:
