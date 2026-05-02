@@ -77,9 +77,7 @@ async def test_supersede_marks_prior_queued_runs(session: AsyncSession) -> None:
     await session.flush()
     rows = list(
         (
-            await session.execute(
-                select(Run).where(Run.task_id == task_id).order_by(Run.queued_at)
-            )
+            await session.execute(select(Run).where(Run.task_id == task_id).order_by(Run.queued_at))
         ).scalars()
     )
     assert len(rows) == 3
