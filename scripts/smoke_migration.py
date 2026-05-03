@@ -45,9 +45,7 @@ async def _round_trip() -> None:
             s.add(ws)
             await s.flush()
 
-            member = WorkspaceMember(
-                workspace_id=ws.id, user_id=user.id, role=WorkspaceRole.owner
-            )
+            member = WorkspaceMember(workspace_id=ws.id, user_id=user.id, role=WorkspaceRole.owner)
             s.add(member)
             await s.commit()
 
@@ -56,9 +54,9 @@ async def _round_trip() -> None:
 
             got = (
                 await s.execute(
-                    select(User, Workspace).join(
-                        Workspace, Workspace.owner_user_id == User.id
-                    ).where(User.id == user.id)
+                    select(User, Workspace)
+                    .join(Workspace, Workspace.owner_user_id == User.id)
+                    .where(User.id == user.id)
                 )
             ).one()
             assert got[0].email == f"smoke_{tag}@example.com"

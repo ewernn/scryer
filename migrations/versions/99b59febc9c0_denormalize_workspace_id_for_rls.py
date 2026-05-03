@@ -29,6 +29,7 @@ depends_on: str | Sequence[str] | None = None
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _add_workspace_id_not_null(
     table: str,
     backfill_sql: str,
@@ -304,6 +305,7 @@ END;
 $$;
 """
 
+
 # Split blob into individual CREATE FUNCTION statements (asyncpg requirement).
 # Each block ends with `$$;` followed by blank line + comment + next CREATE.
 def _split_trigger_functions(blob: str) -> list[str]:
@@ -340,41 +342,71 @@ DROP_TRIGGER_FUNCTIONS = [
 # fire_on_update_of_col: the parent FK column; trigger only fires when it changes.
 _CAT2_TRIGGERS = [
     # 1-hop via project_id
-    ("datasets",          "trg_datasets_workspace_id",          "_trgfn_workspace_from_project",    "project_id"),
-    ("scorers",           "trg_scorers_workspace_id",           "_trgfn_workspace_from_project",    "project_id"),
-    ("agents",            "trg_agents_workspace_id",            "_trgfn_workspace_from_project",    "project_id"),
-    ("tools",             "trg_tools_workspace_id",             "_trgfn_workspace_from_project",    "project_id"),
-    ("prompts",           "trg_prompts_workspace_id",           "_trgfn_workspace_from_project",    "project_id"),
-    ("tasks",             "trg_tasks_workspace_id",             "_trgfn_workspace_from_project",    "project_id"),
-    ("suites",            "trg_suites_workspace_id",            "_trgfn_workspace_from_project",    "project_id"),
-    ("triggers",          "trg_triggers_workspace_id",          "_trgfn_workspace_from_project",    "project_id"),
-    ("comments",          "trg_comments_workspace_id",          "_trgfn_workspace_from_project",    "project_id"),
-    ("collections",       "trg_collections_workspace_id",       "_trgfn_workspace_from_project",    "project_id"),
+    ("datasets", "trg_datasets_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("scorers", "trg_scorers_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("agents", "trg_agents_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("tools", "trg_tools_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("prompts", "trg_prompts_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("tasks", "trg_tasks_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("suites", "trg_suites_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("triggers", "trg_triggers_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("comments", "trg_comments_workspace_id", "_trgfn_workspace_from_project", "project_id"),
+    ("collections", "trg_collections_workspace_id", "_trgfn_workspace_from_project", "project_id"),
     # 1-hop via run_id
-    ("results",           "trg_results_workspace_id",           "_trgfn_workspace_from_run",        "run_id"),
-    ("traces",            "trg_traces_workspace_id",            "_trgfn_workspace_from_run",        "run_id"),
+    ("results", "trg_results_workspace_id", "_trgfn_workspace_from_run", "run_id"),
+    ("traces", "trg_traces_workspace_id", "_trgfn_workspace_from_run", "run_id"),
     # 1-hop via tag_id
-    ("resource_tags",     "trg_resource_tags_workspace_id",     "_trgfn_workspace_from_tag",        "tag_id"),
+    ("resource_tags", "trg_resource_tags_workspace_id", "_trgfn_workspace_from_tag", "tag_id"),
     # 2-hop: dataset_records
-    ("dataset_records",   "trg_dataset_records_workspace_id",   "_trgfn_workspace_from_dataset",    "dataset_id"),
+    (
+        "dataset_records",
+        "trg_dataset_records_workspace_id",
+        "_trgfn_workspace_from_dataset",
+        "dataset_id",
+    ),
     # 2-hop: agent_tools
-    ("agent_tools",       "trg_agent_tools_workspace_id",       "_trgfn_workspace_from_agent",      "agent_id"),
+    ("agent_tools", "trg_agent_tools_workspace_id", "_trgfn_workspace_from_agent", "agent_id"),
     # 2-hop: suite_tasks, suite_runs
-    ("suite_tasks",       "trg_suite_tasks_workspace_id",       "_trgfn_workspace_from_suite",      "suite_id"),
-    ("suite_runs",        "trg_suite_runs_workspace_id",        "_trgfn_workspace_from_suite",      "suite_id"),
+    ("suite_tasks", "trg_suite_tasks_workspace_id", "_trgfn_workspace_from_suite", "suite_id"),
+    ("suite_runs", "trg_suite_runs_workspace_id", "_trgfn_workspace_from_suite", "suite_id"),
     # 3-hop: suite_run_runs
-    ("suite_run_runs",    "trg_suite_run_runs_workspace_id",    "_trgfn_workspace_from_suite_run",  "suite_run_id"),
+    (
+        "suite_run_runs",
+        "trg_suite_run_runs_workspace_id",
+        "_trgfn_workspace_from_suite_run",
+        "suite_run_id",
+    ),
     # 2-hop: trace_steps
-    ("trace_steps",       "trg_trace_steps_workspace_id",       "_trgfn_workspace_from_trace",      "trace_id"),
+    ("trace_steps", "trg_trace_steps_workspace_id", "_trgfn_workspace_from_trace", "trace_id"),
     # 2-hop: comment_versions
-    ("comment_versions",  "trg_comment_versions_workspace_id",  "_trgfn_workspace_from_comment",    "comment_id"),
+    (
+        "comment_versions",
+        "trg_comment_versions_workspace_id",
+        "_trgfn_workspace_from_comment",
+        "comment_id",
+    ),
     # 2-hop: collection_members
-    ("collection_members","trg_collection_members_workspace_id","_trgfn_workspace_from_collection", "collection_id"),
+    (
+        "collection_members",
+        "trg_collection_members_workspace_id",
+        "_trgfn_workspace_from_collection",
+        "collection_id",
+    ),
 ]
 
 _CAT4_TRIGGERS = [
-    ("api_keys",     "trg_api_keys_workspace_id",     "_trgfn_workspace_from_service_account_nullable", "principal_service_account_id"),
-    ("api_key_usage","trg_api_key_usage_workspace_id","_trgfn_workspace_from_api_key_nullable",          "api_key_id"),
+    (
+        "api_keys",
+        "trg_api_keys_workspace_id",
+        "_trgfn_workspace_from_service_account_nullable",
+        "principal_service_account_id",
+    ),
+    (
+        "api_key_usage",
+        "trg_api_key_usage_workspace_id",
+        "_trgfn_workspace_from_api_key_nullable",
+        "api_key_id",
+    ),
 ]
 
 
@@ -395,14 +427,25 @@ def _drop_trigger(table: str, trigger_name: str) -> None:
 # upgrade
 # ---------------------------------------------------------------------------
 
+
 def upgrade() -> None:
     # ── trigger functions ──────────────────────────────────────────────────
     for fn_sql in TRIGGER_FUNCTIONS:
         op.execute(fn_sql)
 
     # ── Cat 2 tables: 1-hop via project_id ────────────────────────────────
-    for table in ("datasets", "scorers", "agents", "tools", "prompts", "tasks",
-                  "suites", "triggers", "comments", "collections"):
+    for table in (
+        "datasets",
+        "scorers",
+        "agents",
+        "tools",
+        "prompts",
+        "tasks",
+        "suites",
+        "triggers",
+        "comments",
+        "collections",
+    ):
         _add_workspace_id_not_null(
             table,
             f"UPDATE {table} t SET workspace_id = p.workspace_id "
@@ -412,15 +455,13 @@ def upgrade() -> None:
     # ── results: 1-hop via run_id ──────────────────────────────────────────
     _add_workspace_id_not_null(
         "results",
-        "UPDATE results t SET workspace_id = r.workspace_id "
-        "FROM runs r WHERE r.id = t.run_id",
+        "UPDATE results t SET workspace_id = r.workspace_id FROM runs r WHERE r.id = t.run_id",
     )
 
     # ── traces: 1-hop via run_id ───────────────────────────────────────────
     _add_workspace_id_not_null(
         "traces",
-        "UPDATE traces t SET workspace_id = r.workspace_id "
-        "FROM runs r WHERE r.id = t.run_id",
+        "UPDATE traces t SET workspace_id = r.workspace_id FROM runs r WHERE r.id = t.run_id",
     )
 
     # ── resource_tags: 1-hop via tag_id ───────────────────────────────────
@@ -485,7 +526,7 @@ def upgrade() -> None:
     )
 
     # ── Cat 4: nullable workspace_id ──────────────────────────────────────
-    _add_workspace_id_nullable("api_keys",     "fk_api_keys_workspace_id_workspaces")
+    _add_workspace_id_nullable("api_keys", "fk_api_keys_workspace_id_workspaces")
     # Backfill SA-keyed api_keys
     op.execute("""
         UPDATE api_keys k
@@ -513,6 +554,7 @@ def upgrade() -> None:
 # downgrade
 # ---------------------------------------------------------------------------
 
+
 def downgrade() -> None:
     # Drop triggers first
     for table, trg_name, _fn, _col in _CAT2_TRIGGERS + _CAT4_TRIGGERS:
@@ -523,12 +565,28 @@ def downgrade() -> None:
 
     # Drop columns in reverse dependency order (children before parents)
     for table in (
-        "api_key_usage", "api_keys",
-        "collection_members", "comment_versions", "trace_steps",
-        "suite_run_runs", "suite_runs", "suite_tasks",
-        "agent_tools", "dataset_records",
-        "resource_tags", "traces", "results",
-        "collections", "comments", "triggers", "suites",
-        "tasks", "prompts", "tools", "agents", "scorers", "datasets",
+        "api_key_usage",
+        "api_keys",
+        "collection_members",
+        "comment_versions",
+        "trace_steps",
+        "suite_run_runs",
+        "suite_runs",
+        "suite_tasks",
+        "agent_tools",
+        "dataset_records",
+        "resource_tags",
+        "traces",
+        "results",
+        "collections",
+        "comments",
+        "triggers",
+        "suites",
+        "tasks",
+        "prompts",
+        "tools",
+        "agents",
+        "scorers",
+        "datasets",
     ):
         _drop_workspace_id(table)

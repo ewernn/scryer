@@ -1,4 +1,5 @@
-"""Alembic env.py — async-aware, reads URL from scryer.config.
+"""Alembic env.py — async-aware, reads URL from scryer.config OR
+SCRYER_TEST_DATABASE_URL env var (test path; bypasses lru_cache).
 
 Models are imported here so autogenerate sees them. As clusters land in
 Phase 1+, add their model imports below.
@@ -7,6 +8,7 @@ Phase 1+, add their model imports below.
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -21,7 +23,10 @@ target_metadata = Base.metadata
 
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Tests set SCRYER_TEST_DATABASE_URL after spinning docker postgres; honor it.
+# (Avoids the get_settings lru_cache pinning the prod DATABASE_URL.)
+_url = os.environ.get("SCRYER_TEST_DATABASE_URL") or get_settings().database_url
+config.set_main_option("sqlalchemy.url", _url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
