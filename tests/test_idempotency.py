@@ -151,3 +151,86 @@ async def test_idempotency_silent_when_header_absent(
     assert r2.status_code == 200
     # Two distinct runs created (no cache)
     assert r1.json()["id"] != r2.json()["id"]
+
+
+async def test_idempotency_wired_on_dataset_push(
+    client: AsyncClient, http_session: AsyncSession
+) -> None:
+    """POST datasets uses idempotency. Same key+body → second request returns
+    cached or in-flight; never duplicates the dataset."""
+    from sqlalchemy import select
+
+    from scryer.server.models.auth import Workspace
+    from scryer.server.services.projects import create_project
+
+    email, pw, ws_slug = await _signup(http_session)
+    h = await _bearer(client, email, pw)
+    ws = (
+        await http_session.execute(select(Workspace).where(Workspace.slug == ws_slug))
+    ).scalar_one()
+    proj = await create_project(
+        http_session,
+        workspace_id=ws.id,
+        slug="p",
+        name="P",
+        owner_user_id=ws.owner_user_id,
+    )
+    await http_session.commit()
+
+    body = {
+        "slug": "ds",
+        "name": "DS",
+        "records": [{"inputs": {"k": "v"}}],
+    }
+    key = f"idem-{uuid4().hex[:8]}"
+    headers = {**h, "Idempotency-Key": key}
+
+    r1 = await client.post(
+        f"/api/v1/workspaces/{ws_slug}/projects/{proj.slug}/datasets",
+        json=body,
+        headers=headers,
+    )
+    assert r1.status_code == 200, r1.text
+    ds_id_1 = r1.json()["id"]
+
+    r2 = await client.post(
+        f"/api/v1/workspaces/{ws_slug}/projects/{proj.slug}/datasets",
+        json=body,
+        headers=headers,
+    )
+    assert r2.status_code in (200, 409), r2.text
+    if r2.status_code == 200:
+        assert r2.json()["id"] == ds_id_1
+        assert r2.headers.get("Idempotent-Replay") == "true"
+
+
+async def test_idempotency_webhook_create_caches_status_only(
+    client: AsyncClient, http_session: AsyncSession
+) -> None:
+    """Webhook create endpoint passes cache_body=False because the response
+    includes the one-shot HMAC secret. Replay returns 201 status with NO
+    body — the secret cannot be recovered from the cache."""
+    email, pw, ws_slug = await _signup(http_session)
+    h = await _bearer(client, email, pw)
+
+    body = {
+        "name": "wh1",
+        "url": "https://example.com/hook",
+        "event_types": ["run.completed"],
+    }
+    key = f"idem-{uuid4().hex[:8]}"
+    headers = {**h, "Idempotency-Key": key}
+
+    r1 = await client.post(f"/api/v1/workspaces/{ws_slug}/webhooks", json=body, headers=headers)
+    assert r1.status_code == 201, r1.text
+    secret_1 = r1.json()["secret"]
+    assert secret_1, "first response should expose the secret"
+
+    r2 = await client.post(f"/api/v1/workspaces/{ws_slug}/webhooks", json=body, headers=headers)
+    assert r2.status_code in (201, 409), r2.text
+    if r2.status_code == 201:
+        # Replay path: status preserved, body is null (secret stripped),
+        # Idempotent-Replay header present.
+        assert r2.headers.get("Idempotent-Replay") == "true"
+        # Cached body is NULL — handler returns null/empty content.
+        assert r2.text in ("null", "", "{}"), f"replay should return empty body, got: {r2.text!r}"

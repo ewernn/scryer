@@ -312,7 +312,11 @@ async def test_delete_workspace_endpoint_owner_only(
 async def test_delete_workspace_endpoint_idempotent(
     client: AsyncClient, http_session: AsyncSession
 ) -> None:
-    """Re-DELETE returns 204 silently (workspace already archived)."""
+    """Re-DELETE returns 404 because get_workspace_by_slug filters
+    archived. The first DELETE archived the workspace; slug-history still
+    points to it, but get_workspace (called by the slug-history fallback)
+    raises NotFoundError on archived workspaces. Stripe-style: archived
+    resources vanish from the resolution surface — by-slug GET also 404s."""
     owner = await create_user(http_session, email=f"o{uuid4().hex[:6]}@x.com", password="x" * 16)
     ws = await create_workspace(
         http_session, slug=f"ws-{uuid4().hex[:6]}", name="W", owner_user_id=owner.id
@@ -329,10 +333,11 @@ async def test_delete_workspace_endpoint_idempotent(
     r2 = await client.delete(
         f"/api/v1/workspaces/{ws.slug}", headers={"Authorization": f"Bearer {token}"}
     )
-    # archive_workspace early-returns if already archived; endpoint stays 204.
-    # Note: get_workspace_by_slug filters archived workspaces, so a 404 here
-    # would also be acceptable Stripe-style. We accept both.
-    assert r2.status_code in (204, 404), r2.text
+    # archive_workspace early-returns if already archived. But
+    # get_workspace_by_slug filters archived workspaces and the
+    # slug-history fallback also raises NotFoundError on archived. So
+    # the endpoint reliably 404s on the second DELETE.
+    assert r2.status_code == 404, r2.text
 
 
 # Smuggle in the cleanup of the unused PrincipalKind import that pyright might complain about.
