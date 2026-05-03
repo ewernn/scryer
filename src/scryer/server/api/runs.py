@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.models.eval import Task
-from scryer.server.services.access import assert_project_access
+from scryer.server.services.access import assert_project_access, require_workspace_from_path
 from scryer.server.services.errors import NotFoundError
 from scryer.server.services.runs import (
     cancel_run,
@@ -23,7 +23,11 @@ from scryer.server.services.runs import (
     queue_run,
 )
 
-router = APIRouter(tags=["runs"])
+# Workspace-scoped: every URL carries {workspace_slug}, the router-level
+# dep sets RLS context (current_workspace_id GUC) BEFORE handlers query
+# the RLS-policied tasks/runs/results tables. Without this, every Run
+# lookup would silently 404 under FORCE RLS in production.
+router = APIRouter(tags=["runs"], dependencies=[Depends(require_workspace_from_path)])
 
 
 class RunStartRequest(BaseModel):
@@ -71,12 +75,13 @@ def _run_to_out(r: Any) -> RunOut:
 
 
 @router.post(
-    "/runs",
+    "/workspaces/{workspace_slug}/runs",
     response_model=RunOut,
     operation_id="runs.start",
     summary="Queue a Run for a Task; v0 executes synchronously inline",
 )
 async def start(
+    workspace_slug: str,
     body: RunStartRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -101,11 +106,12 @@ async def start(
 
 
 @router.get(
-    "/runs/{run_id}",
+    "/workspaces/{workspace_slug}/runs/{run_id}",
     response_model=RunOut,
     operation_id="runs.get",
 )
 async def get(
+    workspace_slug: str,
     run_id: str,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -116,11 +122,12 @@ async def get(
 
 
 @router.post(
-    "/runs/{run_id}/cancel",
+    "/workspaces/{workspace_slug}/runs/{run_id}/cancel",
     response_model=RunOut,
     operation_id="runs.cancel",
 )
 async def cancel(
+    workspace_slug: str,
     run_id: str,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -133,11 +140,12 @@ async def cancel(
 
 
 @router.get(
-    "/runs/{run_id}/results",
+    "/workspaces/{workspace_slug}/runs/{run_id}/results",
     response_model=list[ResultOut],
     operation_id="runs.list_results",
 )
 async def results(
+    workspace_slug: str,
     run_id: str,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],

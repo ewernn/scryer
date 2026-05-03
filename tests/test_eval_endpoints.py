@@ -86,13 +86,13 @@ async def test_push_dataset_scorer_task_then_run(
     assert r.status_code == 200, r.text
     task = r.json()
 
-    r = await client.post("/api/v1/runs", json={"task_id": task["id"]}, headers=h)
+    r = await client.post(f"/api/v1/workspaces/{ws}/runs", json={"task_id": task["id"]}, headers=h)
     assert r.status_code == 200, r.text
     run = r.json()
     assert run["status"] == "done"
     assert run["n_done"] == 2
 
-    r = await client.get(f"/api/v1/runs/{run['id']}/results", headers=h)
+    r = await client.get(f"/api/v1/workspaces/{ws}/runs/{run['id']}/results", headers=h)
     assert r.status_code == 200
     rows = r.json()
     assert len(rows) == 2

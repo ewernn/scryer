@@ -24,6 +24,7 @@ def _need_token(profile: str) -> Profile:
 
 @app.command("start")
 def start(
+    workspace: str = typer.Argument(..., help="Workspace slug"),
     task_id: str = typer.Argument(...),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
     supersede: bool = typer.Option(
@@ -36,7 +37,7 @@ def start(
     pf = _need_token(profile)
     with client_for(pf) as client:
         r = client.post(
-            "/api/v1/runs",
+            f"/api/v1/workspaces/{workspace}/runs",
             json={"task_id": task_id, "execute_now": True, "supersede": supersede},
         )
     if r.status_code != 200:
@@ -51,12 +52,13 @@ def start(
 
 @app.command("get")
 def get(
+    workspace: str = typer.Argument(..., help="Workspace slug"),
     run_id: str = typer.Argument(...),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
 ) -> None:
     pf = _need_token(profile)
     with client_for(pf) as client:
-        r = client.get(f"/api/v1/runs/{run_id}")
+        r = client.get(f"/api/v1/workspaces/{workspace}/runs/{run_id}")
     if r.status_code != 200:
         typer.echo(f"{r.status_code} {r.text}", err=True)
         raise typer.Exit(1)
@@ -65,6 +67,7 @@ def get(
 
 @app.command("results")
 def results(
+    workspace: str = typer.Argument(..., help="Workspace slug"),
     run_id: str = typer.Argument(...),
     profile: str = typer.Option(DEFAULT_PROFILE, "--profile"),
     output: str = typer.Option("table", "--output", "-o"),
@@ -72,7 +75,7 @@ def results(
     """List per-record Results for a Run."""
     pf = _need_token(profile)
     with client_for(pf) as client:
-        r = client.get(f"/api/v1/runs/{run_id}/results")
+        r = client.get(f"/api/v1/workspaces/{workspace}/runs/{run_id}/results")
     if r.status_code != 200:
         typer.echo(f"{r.status_code} {r.text}", err=True)
         raise typer.Exit(1)

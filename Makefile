@@ -20,7 +20,7 @@ unhide-pth:
 		chflags nohidden .venv/lib/python3.14/site-packages/*.pth 2>/dev/null || true; \
 	fi
 
-test:
+test: unhide-pth
 	$(UV) run pytest -v
 
 # End-to-end Alembic migration test: docker postgres + upgrade + smoke + down + re-up.
