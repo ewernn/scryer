@@ -8,12 +8,14 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `9db64f8a534b` (cascade-down soft-delete +
-  archived_at RLS). Recent: a1b2c3d4e5f6 (idempotency_keys), f3c5d8e0a712
-  (time-as-DB-truth), e9f1a4c8b3d6 (audit_events strict isolation),
-  d8a719c5b2e7 (slug history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
-- **Tests**: 194 passing in ~24s
-- **Active wave**: Wave 3 PID-tracking cancellation — see below
+- **Migration head in prod**: `47ae45c7f465` (Run.executor_pid). Recent:
+  9db64f8a534b (cascade-down soft-delete + archived_at RLS),
+  a1b2c3d4e5f6 (idempotency_keys), f3c5d8e0a712 (time-as-DB-truth),
+  e9f1a4c8b3d6 (audit_events strict isolation), d8a719c5b2e7 (slug
+  history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
+- **Tests**: 200 passing in ~26s
+- **Active wave**: NONE — pre-launch hardening complete; remaining queue
+  is deferred (R2 GC, cursor pagination, outbox)
 
 ## Wave 1 SHIPPED (2026-05-03 evening)
 
@@ -44,12 +46,20 @@ USING/WITH CHECK split + include_archived inside trigger. Service code
 (archive_workspace) also sets include_archived=true via
 apply_workspace_context for defense-in-depth.
 
-## Wave 3 NEXT-NEXT — PID-tracking cancellation
+## Wave 3 SHIPPED (2026-05-03 morning)
 
-Add Run.executor_pid column + module-level _active_procs dict in
-services/runs.py + sandbox.run_user_code on_proc_start callback +
-cancel_run does proc.terminate() + 5s grace + proc.kill().
-Cooperative status check between records. ~2-3h.
+PID-tracking cancellation. Migration `47ae45c7f465` adds
+runs.executor_pid (nullable int). services/runs.py gains module-level
+_active_procs dict (run_id → asyncio.subprocess.Process). execute_run
+sets executor_pid = os.getpid() in the queued→running atomic claim,
+registers proc via sandbox.run_user_code's new on_proc_start callback,
+and clears in finally. cancel_run flips status, then if executor_pid
+matches local PID, terminates the proc (proc.terminate() + 5s grace +
+proc.kill()). Cross-process cancellations land at the next per-record
+cooperative status check. 6 tests in test_run_cancellation.py prove
+queued cancel, done-cancel-conflict, executor_pid lifecycle, same-PID
+proc termination, cooperative cross-process cancel, and registry
+cleanup. 200 passing total.
 
 ## Most recent iteration's wave (post-Phase-1c hardening)
 

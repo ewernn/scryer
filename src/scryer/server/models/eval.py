@@ -266,6 +266,13 @@ class Run(Base, TimestampMixin):
     n_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     n_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # PID of the local OS process executing this Run. NULL when queued,
+    # NULL after completion. Used by cancel_run to terminate the
+    # subprocess group when canceller and executor share a process.
+    # Cross-process cancellation falls through to the cooperative status
+    # check between records inside execute_run.
+    executor_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 
 # ── results ──────────────────────────────────────────────────────────────────
 

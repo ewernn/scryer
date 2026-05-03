@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import uuid
 from datetime import UTC, datetime
 
@@ -21,6 +23,13 @@ from scryer.server.services.sandbox import SandboxError, run_user_code
 from scryer.server.services.scorer_output import parse_scorer_output
 
 HEARTBEAT_INTERVAL_S = 30
+CANCEL_GRACE_SECONDS = 5
+
+# Process-local registry: run_id → currently-running scorer subprocess.
+# Populated by execute_run via on_proc_start, cleared in finally. cancel_run
+# inspects this when the canceller and executor share a process; otherwise
+# cancellation lands at the next cooperative status check between records.
+_active_procs: dict[uuid.UUID, asyncio.subprocess.Process] = {}
 
 
 async def queue_run(
@@ -85,7 +94,9 @@ async def execute_run(
     """Atomic queued→running transition prevents duplicate execution.
 
     Heartbeat by wall-clock (every 30s) so slow Scorers don't get reaped
-    by the stale-run sweeper.
+    by the stale-run sweeper. Records `executor_pid = os.getpid()` so
+    cross-process cancel_run callers can detect (and bail to cooperative
+    cancellation) when the executor isn't local.
     """
     from datetime import timedelta
 
@@ -95,7 +106,12 @@ async def execute_run(
     claim = (
         update(Run)
         .where(Run.id == run_id, Run.status == RunStatus.queued)
-        .values(status=RunStatus.running, started_at=now, last_heartbeat_at=now)
+        .values(
+            status=RunStatus.running,
+            started_at=now,
+            last_heartbeat_at=now,
+            executor_pid=os.getpid(),
+        )
         .returning(Run)
     )
     run = (await session.execute(claim)).scalar_one_or_none()
@@ -125,47 +141,76 @@ async def execute_run(
     n_done = n_failed = 0
     start_record = (run.resume_cursor or 0) + 1
     last_heartbeat = now
+    cancelled_mid_run = False
 
-    for rec in records:
-        if rec.record_id < start_record:
-            continue
-        try:
-            sandbox_result = await run_user_code(
-                source=scorer.source_text,
-                entry="score",
-                payload={
-                    "inputs": rec.inputs,
-                    "expected": rec.expected,
-                    "metadata": rec.metadata_json,
-                },
-            )
-            payload = sandbox_result.output
-            score_value, schema_error = parse_scorer_output(payload)
-            session.add(
-                Result(
-                    run_id=run.id,
-                    record_id=rec.record_id,
-                    score_value=score_value,
-                    score_json=payload,
-                    error=schema_error,
-                    duration_ms=sandbox_result.duration_ms,
+    try:
+        for rec in records:
+            if rec.record_id < start_record:
+                continue
+
+            # Cooperative cancellation check: cancel_run flips status='cancelled'
+            # and (if local PID) terminates the proc. Even if we missed the
+            # signal (cross-process), we observe the state change here. Refresh
+            # is intentionally per-record — cheap, and prevents long Scorer runs
+            # from blocking cancel for an entire record.
+            await session.refresh(run, attribute_names=["status"])
+            if run.status == RunStatus.cancelled:
+                cancelled_mid_run = True
+                break
+
+            def _register(p: asyncio.subprocess.Process) -> None:
+                _active_procs[run.id] = p
+
+            try:
+                sandbox_result = await run_user_code(
+                    source=scorer.source_text,
+                    entry="score",
+                    payload={
+                        "inputs": rec.inputs,
+                        "expected": rec.expected,
+                        "metadata": rec.metadata_json,
+                    },
+                    on_proc_start=_register,
                 )
-            )
-            n_done += 1
-        except SandboxError as exc:
-            session.add(Result(run_id=run.id, record_id=rec.record_id, error=str(exc)[:1000]))
-            n_failed += 1
+                payload = sandbox_result.output
+                score_value, schema_error = parse_scorer_output(payload)
+                session.add(
+                    Result(
+                        run_id=run.id,
+                        record_id=rec.record_id,
+                        score_value=score_value,
+                        score_json=payload,
+                        error=schema_error,
+                        duration_ms=sandbox_result.duration_ms,
+                    )
+                )
+                n_done += 1
+            except SandboxError as exc:
+                session.add(Result(run_id=run.id, record_id=rec.record_id, error=str(exc)[:1000]))
+                n_failed += 1
+            finally:
+                _active_procs.pop(run.id, None)
 
-        run.resume_cursor = rec.record_id
-        run.n_done = n_done
-        run.n_failed = n_failed
+            run.resume_cursor = rec.record_id
+            run.n_done = n_done
+            run.n_failed = n_failed
 
-        # Wall-clock heartbeat: every 30s regardless of record count
-        now = datetime.now(UTC)
-        if (now - last_heartbeat) > timedelta(seconds=HEARTBEAT_INTERVAL_S):
-            run.last_heartbeat_at = now
-            last_heartbeat = now
-            await session.flush()
+            # Wall-clock heartbeat: every 30s regardless of record count
+            now = datetime.now(UTC)
+            if (now - last_heartbeat) > timedelta(seconds=HEARTBEAT_INTERVAL_S):
+                run.last_heartbeat_at = now
+                last_heartbeat = now
+                await session.flush()
+    finally:
+        _active_procs.pop(run.id, None)
+        run.executor_pid = None
+
+    if cancelled_mid_run:
+        # Status already 'cancelled' from cancel_run; just stamp completion.
+        run.completed_at = datetime.now(UTC)
+        run.last_heartbeat_at = run.completed_at
+        await session.flush()
+        return run
 
     run.status = RunStatus.failed if n_failed and not n_done else RunStatus.done
     if n_failed and not n_done:
@@ -246,12 +291,40 @@ async def list_results(
 
 
 async def cancel_run(session: AsyncSession, run_id: uuid.UUID) -> Run:
+    """Cancel a queued or running Run.
+
+    For queued Runs, just flips status. For running Runs, also tries to
+    terminate the executor subprocess if it lives in THIS process
+    (executor_pid == os.getpid() AND _active_procs has the proc handle).
+    Cross-process cancellation falls through to the cooperative status
+    check between records inside execute_run — at most one record's
+    worth of latency.
+
+    Termination flow: SIGTERM → wait CANCEL_GRACE_SECONDS → SIGKILL if
+    still alive. The proc.wait() inside the executor's wait_for unblocks
+    on either signal, and the SandboxError path inside execute_run records
+    a 'cancelled' Result and the loop continues to the cancellation
+    cooperative check on the next iteration.
+    """
     run = await get_run(session, run_id)
     if run.status not in (RunStatus.queued, RunStatus.running):
         raise ConflictError(f"Run {run_id} cannot be cancelled in state {run.status.value}")
+
     run.status = RunStatus.cancelled
     run.completed_at = datetime.now(UTC)
     await session.flush()
+
+    # If we're the same process as the executor, also tear down the proc.
+    if run.executor_pid is not None and run.executor_pid == os.getpid():
+        proc = _active_procs.get(run_id)
+        if proc is not None and proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=CANCEL_GRACE_SECONDS)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+
     return run
 
 

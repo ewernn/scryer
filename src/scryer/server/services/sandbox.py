@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import textwrap
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,8 +97,15 @@ async def run_user_code(
     timeout_s: int = _DEFAULT_TIMEOUT_S,
     memory_mb: int = _DEFAULT_MEMORY_MB,
     cpu_s: int = _DEFAULT_CPU_S,
+    on_proc_start: Callable[[asyncio.subprocess.Process], None] | None = None,
 ) -> SandboxResult:
-    """Execute user-supplied Python source in a stripped subprocess."""
+    """Execute user-supplied Python source in a stripped subprocess.
+
+    If `on_proc_start` is provided, it's invoked synchronously with the
+    Process handle right after spawn, BEFORE we await proc.communicate.
+    This is the hook for the executor to register the proc for
+    cancellation; the executor is responsible for unregistering it once
+    this function returns or raises."""
     workdir = Path(tempfile.mkdtemp(prefix=f"scryer_run_{uuid.uuid4().hex[:8]}_"))
     runner_path = workdir / "_runner.py"
     runner_path.write_text(_RUNNER)
@@ -130,6 +138,8 @@ async def run_user_code(
             env=sub_env,
             preexec_fn=lambda: _setrlimits(memory_mb, cpu_s),
         )
+        if on_proc_start is not None:
+            on_proc_start(proc)
         stdin_blob = (
             json.dumps({"source": source, "entry": entry}) + "\n" + json.dumps(payload) + "\n"
         ).encode("utf-8")
