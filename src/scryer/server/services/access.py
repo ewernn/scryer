@@ -22,6 +22,7 @@ from scryer.server.db import apply_workspace_context, get_session
 from scryer.server.models.auth import (
     Project,
     ProjectMember,
+    ServiceAccount,
     Workspace,
     WorkspaceMember,
 )
@@ -37,14 +38,33 @@ _ROLE_RANK = {
 }
 
 
+async def _assert_sa_workspace(
+    session: AsyncSession, sa_id: uuid.UUID, workspace_id: uuid.UUID
+) -> ServiceAccount:
+    """Look up the ServiceAccount and verify it belongs to `workspace_id`.
+
+    Raises NotFoundError (not PermissionError) on mismatch to avoid
+    existence oracle. ServiceAccount.workspace_id is set at create time
+    and CASCADE-deleted with the workspace, so SA's workspace is intrinsic
+    — no separate membership table."""
+    sa = await session.get(ServiceAccount, sa_id)
+    if sa is None or sa.archived_at is not None or sa.workspace_id != workspace_id:
+        raise NotFoundError("workspace", str(workspace_id))
+    if not sa.is_active:
+        raise PermissionError("ServiceAccount is deactivated")
+    return sa
+
+
 async def assert_workspace_member(
     session: AsyncSession, principal: Principal, workspace_id: uuid.UUID
 ) -> None:
-    """Raises NotFoundError (not PermissionError) to avoid existence oracle."""
-    if principal.kind != PrincipalKind.user:
-        # ServiceAccounts are workspace-scoped; resolve via api_key principal_id
-        # path; not yet supported here. v1 once SA-scoped resources land.
-        raise PermissionError("ServiceAccount workspace access not yet supported")
+    """Raises NotFoundError (not PermissionError) to avoid existence oracle.
+
+    User principal: must have a WorkspaceMember row for this workspace.
+    ServiceAccount principal: SA's intrinsic workspace_id must match."""
+    if principal.kind == PrincipalKind.service_account:
+        await _assert_sa_workspace(session, principal.id, workspace_id)
+        return
     row = await session.execute(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == workspace_id,
@@ -55,21 +75,38 @@ async def assert_workspace_member(
         raise NotFoundError("workspace", str(workspace_id))
 
 
+# Effective WorkspaceRole rank for ServiceAccount principals — they pass
+# member-level checks but cannot satisfy owner-level ones (workspace
+# admin operations like deleting members or the workspace itself stay
+# user-only). The api_key's scopes still constrain what an SA can do
+# even within member-rank operations.
+_SA_EFFECTIVE_RANK = _ROLE_RANK[WorkspaceRole.member]
+
+
 async def assert_workspace_role(
     session: AsyncSession,
     principal: Principal,
     workspace_id: uuid.UUID,
     *,
     min_role: WorkspaceRole,
-) -> WorkspaceMember:
+) -> WorkspaceMember | None:
     """Like assert_workspace_member, but also requires the member's role to be
-    at least `min_role` (viewer < member < owner). Returns the member row.
+    at least `min_role` (viewer < member < owner).
+
+    Returns the WorkspaceMember row for User principals; None for SA
+    principals (no membership row — SA effective rank is `member`).
 
     Membership-not-found raises NotFoundError (no oracle); insufficient role
     raises PermissionError (the principal IS in the workspace, just lacks
     privilege — masking that as "not found" would be confusing)."""
-    if principal.kind != PrincipalKind.user:
-        raise PermissionError("ServiceAccount workspace access not yet supported")
+    if principal.kind == PrincipalKind.service_account:
+        await _assert_sa_workspace(session, principal.id, workspace_id)
+        if _SA_EFFECTIVE_RANK < _ROLE_RANK[min_role]:
+            raise PermissionError(
+                f"Requires workspace role {min_role.value!r} "
+                f"(ServiceAccount effective rank: 'member')"
+            )
+        return None
     row = await session.execute(
         select(WorkspaceMember).where(
             WorkspaceMember.workspace_id == workspace_id,
@@ -89,15 +126,23 @@ async def assert_workspace_role(
 async def assert_project_access(
     session: AsyncSession, principal: Principal, project_id: uuid.UUID
 ) -> Project:
-    """Returns the Project iff principal can read it. Visibility-aware:
-    `workspace`-projects accessible to all workspace members; `private` requires
-    explicit project membership. Raises NotFoundError on no access."""
+    """Returns the Project iff principal can read it.
+
+    User principal — visibility-aware: `workspace`-projects accessible to
+    all workspace members; `private` requires explicit ProjectMember.
+
+    SA principal — SA can read all `workspace`-visibility projects in
+    its workspace. Cannot access private projects (no SA-project-membership
+    concept — keep that for v2 if needed)."""
     proj = await session.get(Project, project_id)
     if proj is None or proj.archived_at is not None:
         raise NotFoundError("project", str(project_id))
 
-    if principal.kind != PrincipalKind.user:
-        raise PermissionError("ServiceAccount project access not yet supported")
+    if principal.kind == PrincipalKind.service_account:
+        await _assert_sa_workspace(session, principal.id, proj.workspace_id)
+        if proj.visibility == ProjectVisibility.private:
+            raise NotFoundError("project", str(project_id))
+        return proj
 
     ws_member = await session.execute(
         select(WorkspaceMember).where(
