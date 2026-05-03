@@ -12,11 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
-from scryer.server.services.access import assert_workspace_member
+from scryer.server.services.access import assert_workspace_member, require_workspace_from_path
 from scryer.server.services.audit import list_events
 from scryer.server.services.workspaces import get_workspace_by_slug
 
-router = APIRouter(prefix="/workspaces", tags=["audit"])
+router = APIRouter(
+    prefix="/workspaces",
+    tags=["audit"],
+    dependencies=[Depends(require_workspace_from_path)],
+)
 
 
 class AuditEventOut(BaseModel):

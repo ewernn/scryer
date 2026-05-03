@@ -13,14 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
-from scryer.server.services.access import get_project_by_slug_path
+from scryer.server.services.access import get_project_by_slug_path, require_workspace_from_path
 from scryer.server.services.tasks import (
     get_task_latest,
     list_tasks,
     push_task,
 )
 
-router = APIRouter(tags=["tasks"])
+router = APIRouter(tags=["tasks"], dependencies=[Depends(require_workspace_from_path)])
 
 
 class TaskPushRequest(BaseModel):

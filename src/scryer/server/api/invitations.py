@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.models.enums import WorkspaceRole
-from scryer.server.services.access import assert_workspace_role
+from scryer.server.services.access import assert_workspace_role, require_workspace_from_path
 from scryer.server.services.audit import write_event
 from scryer.server.services.invitations import (
     create_invitation,
@@ -26,7 +26,11 @@ from scryer.server.services.invitations import (
 from scryer.server.services.security import issue_access_jwt
 from scryer.server.services.workspaces import get_workspace_by_slug
 
-invitations_router = APIRouter(prefix="/workspaces", tags=["invitations"])
+invitations_router = APIRouter(
+    prefix="/workspaces",
+    tags=["invitations"],
+    dependencies=[Depends(require_workspace_from_path)],
+)
 signup_router = APIRouter(prefix="/auth", tags=["auth"])
 
 

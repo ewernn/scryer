@@ -12,11 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.models.enums import ProjectVisibility
-from scryer.server.services.access import assert_workspace_member
+from scryer.server.services.access import assert_workspace_member, require_workspace_from_path
 from scryer.server.services.projects import list_projects_for_user_in_workspace
 from scryer.server.services.workspaces import get_workspace_by_slug
 
-router = APIRouter(prefix="/workspaces", tags=["projects"])
+router = APIRouter(
+    prefix="/workspaces",
+    tags=["projects"],
+    dependencies=[Depends(require_workspace_from_path)],
+)
 
 
 class ProjectOut(BaseModel):

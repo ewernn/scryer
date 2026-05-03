@@ -42,9 +42,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 _PG_PORT = int(os.environ.get("SCRYER_TEST_PG_PORT", "54332"))
 _PG_IMAGE = os.environ.get("SCRYER_TEST_PG_IMAGE", "postgres:17-alpine")
-# Fixed container name so a stale container from a crashed/killed pytest run
-# is reliably caught by `docker rm -f` in _start_docker_pg.
-_PG_CONTAINER = "scryer_pytest"
+# Container name derived from port so two concurrent pytest invocations using
+# different SCRYER_TEST_PG_PORT values don't collide on `docker rm -f`.
+# (Fixed name + same port across runs still collides — that's intentional;
+#  parallel pytest on the same port should fail loudly, not silently kill.)
+_PG_CONTAINER = f"scryer_pytest_{_PG_PORT}"
 
 
 def _start_docker_pg() -> str:

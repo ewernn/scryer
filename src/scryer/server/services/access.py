@@ -1,14 +1,24 @@
-"""Central access-control helpers. Use these from API endpoints — never roll
-your own membership/scope checks per-handler."""
+"""Central access-control helpers + FastAPI dependency for workspace context.
+
+Use these from API endpoints — never roll your own membership/scope checks
+per-handler. The `require_workspace_from_path` dep, applied at the router
+level for any route with `{workspace_slug}` in the URL, resolves the
+workspace AND sets `request.state.workspace_id` + `session.info["workspace_id"]`
+so the RLS listener (db.py) sees it on the NEXT transaction. This is the
+structural enforcement layer — handlers can't forget to set workspace
+context."""
 
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
+from fastapi import Depends, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from scryer.server.auth import Principal
+from scryer.server.auth import Principal, get_principal
+from scryer.server.db import get_session
 from scryer.server.models.auth import (
     Project,
     ProjectMember,
@@ -109,6 +119,35 @@ async def assert_project_access(
             raise NotFoundError("project", str(project_id))
 
     return proj
+
+
+async def require_workspace_from_path(
+    workspace_slug: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> uuid.UUID:
+    """FastAPI dep: resolve workspace from `{workspace_slug}` path param,
+    assert principal is a member, set RLS context for subsequent queries.
+
+    Apply at router level via:
+        router = APIRouter(
+            prefix="/workspaces",
+            dependencies=[Depends(require_workspace_from_path)],
+        )
+    or per-route on routers that mix workspace-scoped + global routes.
+
+    Sets BOTH:
+      - request.state.workspace_id  → consumed by future Depends/middleware
+      - session.info["workspace_id"] → consumed by RLS listener at next tx
+    """
+    from scryer.server.services.workspaces import get_workspace_by_slug
+
+    ws = await get_workspace_by_slug(session, workspace_slug)
+    await assert_workspace_member(session, principal, ws.id)
+    request.state.workspace_id = ws.id
+    session.info["workspace_id"] = ws.id
+    return ws.id
 
 
 async def get_project_by_slug_path(
