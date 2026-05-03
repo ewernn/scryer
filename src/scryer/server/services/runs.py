@@ -142,6 +142,8 @@ async def execute_run(
     start_record = (run.resume_cursor or 0) + 1
     last_heartbeat = now
     cancelled_mid_run = False
+    crashed = False
+    crash_reason: str | None = None
 
     try:
         for rec in records:
@@ -201,9 +203,28 @@ async def execute_run(
                 run.last_heartbeat_at = now
                 last_heartbeat = now
                 await session.flush()
+    except Exception as exc:
+        # Catch-all: any non-SandboxError (DB errors, OOM, asyncio cancel,
+        # etc.) leaves the Run in a sane terminal state instead of stuck
+        # at status='running' waiting for the heartbeat reaper to mislabel
+        # it. Re-raise after marking so the caller sees the original
+        # exception.
+        crashed = True
+        crash_reason = f"executor_crashed: {type(exc).__name__}: {str(exc)[:500]}"
+        raise
     finally:
         _active_procs.pop(run.id, None)
         run.executor_pid = None
+        if crashed:
+            run.status = RunStatus.failed
+            run.failure_reason = crash_reason
+            run.completed_at = datetime.now(UTC)
+            run.last_heartbeat_at = run.completed_at
+            try:
+                await session.flush()
+            except Exception:
+                # Already in a failure path; don't hide the original.
+                pass
 
     if cancelled_mid_run:
         # Status already 'cancelled' from cancel_run; just stamp completion.
@@ -315,15 +336,23 @@ async def cancel_run(session: AsyncSession, run_id: uuid.UUID) -> Run:
     await session.flush()
 
     # If we're the same process as the executor, also tear down the proc.
+    # ProcessLookupError is benign — the proc may have exited between the
+    # returncode check and terminate() (microsecond-window race).
     if run.executor_pid is not None and run.executor_pid == os.getpid():
         proc = _active_procs.get(run_id)
         if proc is not None and proc.returncode is None:
-            proc.terminate()
+            try:
+                proc.terminate()
+            except (ProcessLookupError, OSError):
+                return run
             try:
                 await asyncio.wait_for(proc.wait(), timeout=CANCEL_GRACE_SECONDS)
             except TimeoutError:
-                proc.kill()
-                await proc.wait()
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except (ProcessLookupError, OSError):
+                    pass
 
     return run
 

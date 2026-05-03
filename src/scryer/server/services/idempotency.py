@@ -157,13 +157,23 @@ def capture_idempotency_response(
     *,
     status_code: int,
     body: dict[str, Any] | None,
+    cache_body: bool = True,
 ) -> None:
     """Schedule the post-response write that caches status+body.
 
     Skips if no idempotency row was claimed (header absent OR cache hit
     short-circuited). 5xx responses aren't cached — retries should re-execute.
     Skips if the app's session_factory isn't initialised (e.g. starlette
-    TestClient running without lifespan)."""
+    TestClient running without lifespan).
+
+    `cache_body=False` opts out of body caching for endpoints whose
+    response includes one-shot secrets (webhook secrets, full API keys,
+    OAuth tokens). Replays will return the cached status_code only with
+    a NULL body — clients see the success but cannot recover the secret.
+    The retry must be treated as "create a new resource via a new
+    Idempotency-Key" if the secret is needed. This is the security-
+    preserving Stripe-equivalent: Stripe doesn't return secrets through
+    the idempotency cache either."""
     row_id: uuid.UUID | None = getattr(request.state, "idempotency_row_id", None)
     if row_id is None:
         return
@@ -171,6 +181,8 @@ def capture_idempotency_response(
         return
     if session_factory is None:
         return
+
+    body_to_cache = body if cache_body else None
 
     async def _write() -> None:
         async with session_factory() as s:
@@ -180,7 +192,11 @@ def capture_idempotency_response(
                     "SET status_code = :sc, response_body = :body "
                     "WHERE id = :id"
                 ),
-                {"sc": status_code, "body": json.dumps(body) if body else None, "id": row_id},
+                {
+                    "sc": status_code,
+                    "body": json.dumps(body_to_cache) if body_to_cache else None,
+                    "id": row_id,
+                },
             )
             await s.commit()
 

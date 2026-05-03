@@ -195,6 +195,42 @@ async def test_active_procs_cleared_on_normal_completion(session: AsyncSession) 
     assert run.id not in _active_procs
 
 
+async def test_executor_marks_crashed_runs_failed(session: AsyncSession) -> None:
+    """If the for-loop raises a non-SandboxError (DB blip, OOM, etc.),
+    the Run is marked status='failed' with executor_crashed reason —
+    not left at status='running' for the heartbeat reaper to mislabel
+    as 'heartbeat_timeout'."""
+    ws, proj, task = await _seed_task(session)
+    run = await queue_run(session, task_id=task.id, workspace_id=ws.id, project_id=proj.id)
+    run_id = run.id
+
+    # Patch session.refresh to raise on first call inside the for-loop.
+    # This simulates a transient DB error mid-execution.
+    real_refresh = session.refresh
+    call_count = {"n": 0}
+
+    async def _flaky_refresh(*args, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] >= 1:
+            raise RuntimeError("simulated DB blip")
+        return await real_refresh(*args, **kwargs)
+
+    session.refresh = _flaky_refresh  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="simulated DB blip"):
+            await execute_run(session, run_id=run_id)
+    finally:
+        session.refresh = real_refresh  # type: ignore[method-assign]
+
+    # Re-fetch via fresh helper (the session is now in finally-clean state).
+    fetched = await session.get(Run, run_id)
+    assert fetched is not None
+    assert fetched.status == RunStatus.failed
+    assert fetched.failure_reason is not None
+    assert "executor_crashed" in fetched.failure_reason
+    assert fetched.executor_pid is None
+
+
 # Reference for ruff-unused (import side-effect protected)
 _ = os.getpid
 _ = Run

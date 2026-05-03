@@ -8,12 +8,13 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `47ae45c7f465` (Run.executor_pid). Recent:
-  9db64f8a534b (cascade-down soft-delete + archived_at RLS),
-  a1b2c3d4e5f6 (idempotency_keys), f3c5d8e0a712 (time-as-DB-truth),
-  e9f1a4c8b3d6 (audit_events strict isolation), d8a719c5b2e7 (slug
-  history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
-- **Tests**: 200 passing in ~26s
+- **Migration head in prod**: `8f52f0aae3fe` (cascade fixups: extend
+  grandchildren + trigger save/restore include_archived). Recent:
+  47ae45c7f465 (Run.executor_pid), 9db64f8a534b (cascade-down soft-delete
+  + archived_at RLS), a1b2c3d4e5f6 (idempotency_keys), f3c5d8e0a712
+  (time-as-DB-truth), e9f1a4c8b3d6 (audit_events strict isolation),
+  d8a719c5b2e7 (slug history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
+- **Tests**: 201 passing in ~26s
 - **Active wave**: NONE — pre-launch hardening complete; remaining queue
   is deferred (R2 GC, cursor pagination, outbox)
 
@@ -45,6 +46,35 @@ include_archived='true'` rejects archived NEW rows). Two-part fix:
 USING/WITH CHECK split + include_archived inside trigger. Service code
 (archive_workspace) also sets include_archived=true via
 apply_workspace_context for defense-in-depth.
+
+## Critic-followup fixes SHIPPED (2026-05-03 noon)
+
+After r:critic review of Wave 2+5+3+idempotency, fixed 5 HIGH severity
+findings:
+
+1. **Cascade was 1-hop only** — versioned grandchildren (datasets,
+   scorers, agents, tools, prompts, tasks) stayed visible after archive.
+   Migration 8f52f0aae3fe extends the cascade list to all 11 children.
+2. **Trigger include_archived GUC leaked into post-trigger statements**
+   in same txn — same migration adds save/restore wrapper around the
+   set_config call.
+3. **archive_workspace didn't terminate local procs** — service now
+   iterates _active_procs for the workspace's in-flight Runs and runs
+   the same SIGTERM/grace/SIGKILL sequence as cancel_run.
+4. **executor_pid finally race on unhandled exceptions** — execute_run
+   now wraps the for-loop in `except Exception: crashed=True; raise`
+   and the finally block stamps status='failed' + executor_crashed
+   reason BEFORE the exception propagates. No more 'running' Runs
+   waiting for heartbeat reaper to mislabel as 'heartbeat_timeout'.
+5. **One-shot secrets cached in idempotency response** — webhook secret
+   and SA full_key. Added `cache_body: bool = True` kwarg to
+   capture_idempotency_response; flipped to False on those two
+   endpoints. Replays now return cached status_code with NULL body —
+   client can't recover the secret, must re-issue with fresh key.
+
+Plus 2 LOW: cancel_run wraps proc.terminate() in try/except for
+ProcessLookupError race, and added comment to migration downgrade.
+Tests for crash-handling + grandchild cascade added.
 
 ## Wave 3 SHIPPED (2026-05-03 morning)
 

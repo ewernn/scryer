@@ -102,12 +102,15 @@ async def create_(
     )
     await session.commit()
     out = WebhookCreatedOut.model_validate(wh)
+    # cache_body=False — the response includes the one-shot HMAC secret.
+    # Replays receive only the cached status_code (201) with NULL body.
     capture_idempotency_response(
         background_tasks,
         request,
         getattr(request.app.state, "session_factory", None),
         status_code=201,
         body=out.model_dump(mode="json"),
+        cache_body=False,
     )
     return out
 

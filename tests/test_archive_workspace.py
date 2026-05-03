@@ -119,7 +119,9 @@ async def _seed_workspace_with_children(session: AsyncSession):
 
 async def test_archive_cascades_to_children(session: AsyncSession) -> None:
     """Archiving a workspace bulk-archives projects + service_accounts +
-    credentials + webhooks (1-hop children that mix SoftDeleteMixin)."""
+    credentials + webhooks (1-hop children that mix SoftDeleteMixin) AND
+    versioned grandchildren (datasets, scorers, tasks via 1-hop
+    workspace_id) per migration 8f52f0aae3fe."""
     seed = await _seed_workspace_with_children(session)
     ws_id = seed["ws"].id
     await archive_workspace(session, ws_id)
@@ -129,11 +131,13 @@ async def test_archive_cascades_to_children(session: AsyncSession) -> None:
     sa = await session.get(ServiceAccount, seed["sa"].id)
     cred = await session.get(Credential, seed["cred"].id)
     wh = await session.get(Webhook, seed["wh"].id)
+    ds = await session.get(Dataset, seed["ds"].id)
     for child, label in [
         (proj, "project"),
         (sa, "service_account"),
         (cred, "credential"),
         (wh, "webhook"),
+        (ds, "dataset"),  # versioned grandchild — added in 8f52f0aae3fe
     ]:
         await session.refresh(child)
         assert child.archived_at is not None, f"{label} should be archived after cascade"
@@ -252,14 +256,17 @@ async def test_cascade_trigger_succeeds_under_rls(rls_session: AsyncSession) -> 
 
     # workspaces table is NOT RLS-policied (root resolution target), so
     # the UPDATE workspaces SET archived_at runs unconstrained. The
-    # AFTER-trigger does include_archived bookkeeping on its own.
+    # AFTER-trigger does include_archived bookkeeping internally and
+    # RESTORES the prior value before returning (migration 8f52f0aae3fe).
     await apply_workspace_context(rls_session, ws_id)
     ws = await rls_session.get(Workspace, ws_id)
     assert ws is not None
     ws.archived_at = datetime.now(UTC)
     await rls_session.flush()
 
-    # Verify the cascade actually fanned out.
+    # Trigger restored include_archived to its prior value (unset/'') so
+    # we re-set it here to refresh now-archived child rows.
+    await apply_workspace_context(rls_session, ws_id, include_archived=True)
     await rls_session.refresh(seed["proj"])
     await rls_session.refresh(seed["wh"])
     assert seed["proj"].archived_at is not None

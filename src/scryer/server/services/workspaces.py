@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import uuid
 from datetime import UTC, datetime
@@ -168,22 +170,23 @@ async def list_workspaces_for_user(session: AsyncSession, user_id: uuid.UUID) ->
 async def archive_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> Workspace:
     """Soft-delete a workspace + cascade to children + cancel in-flight runs.
 
-    The DB trigger `trg_workspace_cascade_archive` (migration 9db64f8a534b)
-    fans archived_at out to projects, service_accounts, credentials, budgets,
-    and webhooks. Versioned children (datasets, scorers, etc.) descend
-    through projects so the policy USING clause hides them via the
-    archived_at predicate without requiring a 2-hop trigger.
+    The DB trigger `trg_workspace_cascade_archive` (migration 9db64f8a534b
+    + extension 8f52f0aae3fe) fans archived_at out to projects,
+    service_accounts, credentials, budgets, webhooks, datasets, scorers,
+    agents, tools, prompts, tasks (1-hop children that mix SoftDeleteMixin
+    + carry workspace_id NOT NULL).
 
     Idempotent: re-archiving an already-archived workspace returns the
     existing row unchanged. The trigger WHEN clause prevents the cascade
     fanout from firing twice.
 
-    In-flight Runs (queued, running) are cancelled in bulk here — that's
-    an executor concern (the DB doesn't know which runs to interrupt), not
-    a trigger one. The cancellation is best-effort: a Run that's currently
-    executing on a worker won't actually halt until Wave 3 PID-tracking
-    lands; status='cancelled' will be observed at the next cooperative
-    check between records."""
+    In-flight Runs (queued, running) are cancelled in bulk. For Runs whose
+    executor lives in THIS process, the subprocess is also terminated
+    (Wave 3 PID-tracking). Cross-process Runs land at the next per-record
+    cooperative status check.
+    """
+    from scryer.server.services.runs import CANCEL_GRACE_SECONDS, _active_procs
+
     ws = await session.get(Workspace, workspace_id)
     if ws is None:
         raise NotFoundError("workspace", str(workspace_id))
@@ -191,8 +194,27 @@ async def archive_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> W
         # Idempotent — caller treats this as success without re-firing.
         return ws
 
+    # Snapshot in-flight runs in this workspace BEFORE the bulk UPDATE so
+    # we can iterate _active_procs without races on the status column.
+    inflight = list(
+        (
+            await session.execute(
+                select(Run).where(
+                    Run.workspace_id == workspace_id,
+                    Run.status.in_([RunStatus.queued, RunStatus.running]),
+                )
+            )
+        ).scalars()
+    )
+    local_pid = os.getpid()
+    procs_to_kill = [
+        (r.id, _active_procs.get(r.id))
+        for r in inflight
+        if r.executor_pid == local_pid and r.id in _active_procs
+    ]
+
     ws.archived_at = datetime.now(UTC)
-    await session.flush()  # triggers cascade to projects/SA/credentials/budgets/webhooks
+    await session.flush()  # triggers cascade to children
 
     await session.execute(
         update(Run)
@@ -202,4 +224,24 @@ async def archive_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> W
         )
         .values(status=RunStatus.cancelled, completed_at=datetime.now(UTC))
     )
+
+    # Tear down local subprocesses for in-flight Runs in this workspace.
+    # Same flow as cancel_run: SIGTERM → grace → SIGKILL. Best-effort —
+    # ProcessLookupError is a benign race (proc already exited).
+    for _run_id, proc in procs_to_kill:
+        if proc is None or proc.returncode is not None:
+            continue
+        try:
+            proc.terminate()
+        except (ProcessLookupError, OSError):
+            continue
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=CANCEL_GRACE_SECONDS)
+        except TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except (ProcessLookupError, OSError):
+                pass
+
     return ws
