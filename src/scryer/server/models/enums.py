@@ -92,10 +92,10 @@ class RunStatus(StrEnum):
     superseded = "superseded"
 
 
-class TraceStorage(StrEnum):
-    """Where trace steps live. Set at flush time based on n_steps."""
+class TrajectoryStorage(StrEnum):
+    """Where trajectory steps live. Set at flush time based on n_steps."""
 
-    inline = "inline"  # trace_steps table
+    inline = "inline"  # trajectory_steps table
     r2 = "r2"  # storage_uri populated
 
 

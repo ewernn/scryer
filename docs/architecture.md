@@ -12,7 +12,7 @@ services/    <- pure async business logic, raises typed errors
 models/      <- SQLAlchemy 2.x; CHECK constraints; UNIQUE indexes
     |
     v
-Postgres (Neon) + R2 (Trace spill)
+Postgres (Neon) + R2 (Trajectory spill)
 ```
 
 ## Schema clusters
@@ -22,7 +22,7 @@ Models are grouped by cluster, one file each in `src/scryer/server/models/`:
 | Cluster | File | Purpose |
 |---------|------|---------|
 | 1 — Identity | `auth.py` | User, Workspace, Project, ApiKey, Invitation, Credential, ServiceAccount, Membership tables |
-| 2 — Eval core | `eval.py` | Dataset, DatasetRecord, Scorer, Agent, Tool, Prompt, Task, Run, Result, Trace, TraceStep |
+| 2 — Eval core | `eval.py` | Dataset, DatasetRecord, Scorer, Agent, Tool, Prompt, Task, Run, Result, Trajectory, TrajectoryStep |
 | 3 — Audit + automation | `audit.py` | AuditEvent, Suite, Trigger, UsageRecord, Webhook, WebhookDelivery |
 | 4 — Collab | `collab.py` | Comment, CommentVersion, Collection, CollectionMember |
 
@@ -52,7 +52,7 @@ Every multi-tenant table carries a `workspace_id` column (NOT NULL FK
 CASCADE → workspaces, with a few `nullable=True` exceptions for system
 rows like `audit_events` and user-keyed `api_keys`). For tables that
 don't naturally hold workspace_id — child rows like `dataset_records`,
-`results`, `trace_steps` — a PG `BEFORE INSERT OR UPDATE` trigger
+`results`, `trajectory_steps` — a PG `BEFORE INSERT OR UPDATE` trigger
 auto-populates `NEW.workspace_id` from the parent FK chain
 (`_trgfn_workspace_from_project`, `_trgfn_workspace_from_run`, etc.).
 Service code never sets `workspace_id` on these tables — the trigger
@@ -243,13 +243,13 @@ status_code with NULL body, so retries cannot recover the secret.
 4. Dead-letter after 4 failed attempts.
 5. SSRF defense: DNS re-resolution at fire time + RFC 5735 private-range denylist.
 
-## Trace storage
+## Trajectory storage
 
-`services/traces.py:write_trace` decides per-Trace:
+`services/trajectories.py:write_trajectory` decides per-Trajectory:
 
-- ≤ 4 KiB serialized → inline TraceStep rows in PG
-- larger → one R2 JSON blob at `r2://scryer-blobs/ws/{ws}/proj/{proj}/traces/{run}/{record}.json`,
-  stored URI + sha256 on the Trace row, `storage='r2'`
+- ≤ 4 KiB serialized → inline TrajectoryStep rows in PG
+- larger → one R2 JSON blob at `r2://scryer-blobs/ws/{ws}/proj/{proj}/trajectories/{run}/{record}.json`,
+  stored URI + sha256 on the Trajectory row, `storage='r2'`
 - CHECK enforces `(storage='inline') OR (storage_uri IS NOT NULL AND storage_sha256 IS NOT NULL)`
 
 R2 PUT happens **before** the PG flush so a failed PUT leaves no dangling

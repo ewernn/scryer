@@ -9,7 +9,7 @@ Path-based keys, scoped per workspace and project for blast-radius isolation:
 
     r2://{bucket}/ws/{workspace_id}/proj/{project_id}/{kind}/{relpath}
 
-Where `kind` is one of: traces, results, archives.
+Where `kind` is one of: trajectories, results, archives.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def make_blob_key(
     enforced so a misuse can't cross-pollute namespaces."""
     if ".." in relpath or relpath.startswith("/"):
         raise ValidationError(f"Invalid blob relpath: {relpath!r}")
-    if kind not in ("traces", "results", "archives"):
+    if kind not in ("trajectories", "results", "archives"):
         raise ValidationError(f"Unknown blob kind: {kind!r}")
     return f"ws/{workspace_id}/proj/{project_id}/{kind}/{relpath}"
 

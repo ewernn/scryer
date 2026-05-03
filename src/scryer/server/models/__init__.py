@@ -51,8 +51,8 @@ from scryer.server.models.eval import (  # noqa: F401
     Scorer,
     Task,
     Tool,
-    Trace,
-    TraceStep,
+    Trajectory,
+    TrajectoryStep,
 )
 from scryer.server.models.idempotency import IdempotencyKey  # noqa: F401
 

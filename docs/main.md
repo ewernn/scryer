@@ -73,7 +73,7 @@ curl -H "Authorization: Bearer $TOKEN" -d '{
 ## Stack
 
 - Python 3.12+ · FastAPI · SQLAlchemy 2.x async · Pydantic 2 · Typer
-- PostgreSQL 17 (Neon) · Cloudflare R2 for Trace blobs
+- PostgreSQL 17 (Neon) · Cloudflare R2 for Trajectory blobs
 - argon2id passwords · sha256 ApiKey/Invitation tokens · AES-GCM Credentials · pyjwt HS256 sessions
 - RFC 9457 problem+json errors · X-Request-ID via asgi-correlation-id
 - Server-rendered Jinja + htmx + Tailwind dashboard at `/web/*`

@@ -5,7 +5,7 @@
 - scorers, agents, tools, prompts (versioned via VersionedMixin)
 - agent_tools junction
 - tasks (versioned binding)
-- runs, results, traces, trace_steps
+- runs, results, trajectories, trajectory_steps
 
 All FKs are concrete (no polymorphic FK pattern in this cluster).
 """
@@ -45,7 +45,7 @@ from scryer.server.models.base import (
 from scryer.server.models.enums import (
     PromptTemplateFormat,
     RunStatus,
-    TraceStorage,
+    TrajectoryStorage,
 )
 
 # ── datasets + dataset_records ──────────────────────────────────────────────
@@ -307,16 +307,17 @@ class Result(Base):
     )
 
 
-# ── traces + trace_steps ─────────────────────────────────────────────────────
+# ── trajectories + trajectory_steps ──────────────────────────────────────────
 
 
-class Trace(Base, TimestampMixin):
-    """Per-record execution capture. Small traces inline (trace_steps);
-    large traces spill to R2 (storage_uri + storage_sha256)."""
+class Trajectory(Base, TimestampMixin):
+    """Per-record execution capture. Small trajectories inline
+    (trajectory_steps); large trajectories spill to R2 (storage_uri +
+    storage_sha256)."""
 
-    __tablename__ = "traces"
+    __tablename__ = "trajectories"
     __table_args__ = (
-        UniqueConstraint("run_id", "record_id", name="uq_traces_run_record"),
+        UniqueConstraint("run_id", "record_id", name="uq_trajectories_run_record"),
         CheckConstraint(
             "(storage = 'inline') OR (storage_uri IS NOT NULL AND storage_sha256 IS NOT NULL)",
             name="r2_has_uri_and_checksum",
@@ -331,29 +332,33 @@ class Trace(Base, TimestampMixin):
         Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     record_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    storage: Mapped[TraceStorage] = mapped_column(
-        Enum(TraceStorage, name="trace_storage", native_enum=False, length=16),
+    storage: Mapped[TrajectoryStorage] = mapped_column(
+        Enum(TrajectoryStorage, name="trajectory_storage", native_enum=False, length=16),
         nullable=False,
-        default=TraceStorage.inline,
+        default=TrajectoryStorage.inline,
     )
     storage_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     storage_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     n_steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class TraceStep(Base):
-    """Normalized step rows for inline traces. tool_id FK enables cross-Trace
-    'where was Tool X used' queries."""
+class TrajectoryStep(Base):
+    """Normalized step rows for inline trajectories. tool_id FK enables
+    cross-Trajectory 'where was Tool X used' queries."""
 
-    __tablename__ = "trace_steps"
+    __tablename__ = "trajectory_steps"
     __table_args__ = (
-        Index("ix_trace_steps_trace_id_seq", "trace_id", "seq", unique=True),
-        Index("ix_trace_steps_tool_id", "tool_id", postgresql_where="tool_id IS NOT NULL"),
+        Index("ix_trajectory_steps_trajectory_id_seq", "trajectory_id", "seq", unique=True),
+        Index(
+            "ix_trajectory_steps_tool_id",
+            "tool_id",
+            postgresql_where="tool_id IS NOT NULL",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    trace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("traces.id", ondelete="CASCADE"), nullable=False
+    trajectory_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("trajectories.id", ondelete="CASCADE"), nullable=False
     )
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False

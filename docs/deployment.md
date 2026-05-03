@@ -13,7 +13,7 @@
 | `R2_ENDPOINT` | Cloudflare R2 S3-API URL (no bucket suffix) | yes | `https://<acct>.r2.cloudflarestorage.com` |
 | `R2_ACCESS_KEY_ID` | R2 token access key | yes | 32-hex |
 | `R2_SECRET_ACCESS_KEY` | R2 token secret | yes | 64-hex |
-| `R2_BUCKET_NAME` | Bucket for Trace + archive blobs | yes | e.g. `scryer-blobs` |
+| `R2_BUCKET_NAME` | Bucket for Trajectory + archive blobs | yes | e.g. `scryer-blobs` |
 | `JWT_SECRET` | HS256 signing key for session JWTs | yes | 32+ random chars |
 | `JWT_TTL_SECONDS` | Session lifetime | no (default 3600) | int |
 | `ENCRYPTION_KEY` | AES-GCM key for Credentials at rest | yes | hex-encoded 32 bytes |

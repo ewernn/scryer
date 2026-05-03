@@ -29,7 +29,7 @@ def _unique_key() -> str:
     return make_blob_key(
         workspace_id=uuid.uuid4(),
         project_id=uuid.uuid4(),
-        kind="traces",
+        kind="trajectories",
         relpath=f"_test/{uuid.uuid4().hex}.json",
     )
 
@@ -57,7 +57,7 @@ async def test_make_blob_key_rejects_traversal() -> None:
         make_blob_key(
             workspace_id=uuid.uuid4(),
             project_id=uuid.uuid4(),
-            kind="traces",
+            kind="trajectories",
             relpath="../../etc/passwd",
         )
 
