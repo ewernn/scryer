@@ -120,9 +120,10 @@ async def test_run_page_idor_other_users_run_returns_404(
         "/web/login", data={"email": email_a, "password": pw_a}, follow_redirects=False
     )
     cookie = r.cookies["scryer_session"]
+    # IDOR via direct workspace path: user A claims to be in B's workspace.
+    # assert_workspace_member raises NotFoundError → 404.
     r = await client.get(
-        f"/web/runs/{run.id}",
+        f"/web/workspaces/{ws_b}/runs/{run.id}",
         cookies={"scryer_session": cookie},
     )
-    # Should be 404 not 200; assert_project_access raises NotFoundError → RFC 9457 404
     assert r.status_code == 404, f"IDOR! got {r.status_code}: {r.text[:200]}"

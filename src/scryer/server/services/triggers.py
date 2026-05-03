@@ -54,13 +54,15 @@ async def create_schedule_trigger(
             f"Trigger interval must be at least {MIN_CRON_INTERVAL_S}s (plan §15)"
         )
 
+    # Per plan §15: cap is per-WORKSPACE (cron-load budget × 5min interval),
+    # not per-project. The earlier per-project filter let a workspace with
+    # N projects have 20*N triggers — capacity contract violation.
     active_count = (
         await session.execute(
             select(func.count())
             .select_from(Trigger)
-            .join(Task, Trigger.target_id == Task.id, isouter=True)
             .where(Trigger.is_active.is_(True))
-            .where(Trigger.project_id == project_id)
+            .where(Trigger.workspace_id == workspace_id)
         )
     ).scalar_one()
     if active_count >= MAX_TRIGGERS_PER_WORKSPACE:

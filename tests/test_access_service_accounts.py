@@ -109,3 +109,16 @@ async def test_sa_deactivated_raises(session: AsyncSession) -> None:
     await session.flush()
     with pytest.raises(PermissionError):
         await assert_workspace_member(session, _sa_principal(sa.id), ws.id)
+
+
+async def test_sa_archived_workspace_raises(session: AsyncSession) -> None:
+    """If a workspace is soft-deleted (archived_at set), SAs that would
+    otherwise pass the SA-workspace match must NOT authenticate."""
+    from datetime import UTC, datetime
+
+    user, ws = await _user_and_ws(session)
+    sa = await create_service_account(session, workspace_id=ws.id, name="bot")
+    ws.archived_at = datetime.now(UTC)
+    await session.flush()
+    with pytest.raises(NotFoundError):
+        await assert_workspace_member(session, _sa_principal(sa.id), ws.id)

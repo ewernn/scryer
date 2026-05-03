@@ -163,23 +163,34 @@ async def project_page(
     )
 
 
-@router.get("/web/runs/{run_id}", response_class=HTMLResponse)
+@router.get("/web/workspaces/{ws_slug}/runs/{run_id}", response_class=HTMLResponse)
 async def run_page(
     request: Request,
+    ws_slug: str,
     run_id: str,
     user_id: Annotated[uuid.UUID, Depends(_require_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> HTMLResponse:
+    """Workspace-scoped run page. The workspace_slug in the URL lets us
+    set the RLS GUC via apply_workspace_context BEFORE querying the
+    RLS-policied runs / results / comments tables (without context FORCE
+    RLS would silently 404 every page)."""
     from scryer.server.auth import Principal
-    from scryer.server.services.access import assert_project_access
+    from scryer.server.db import apply_workspace_context
+    from scryer.server.services.access import assert_project_access, assert_workspace_member
     from scryer.server.services.comments import list_comments_for_resource
+    from scryer.server.services.workspaces import get_workspace_by_slug
+
+    principal = Principal(id=user_id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read}))
+    ws = await get_workspace_by_slug(session, ws_slug)
+    await apply_workspace_context(session, ws.id, user_id=user_id)
+    await assert_workspace_member(session, principal, ws.id)
 
     rid = uuid.UUID(run_id)
     run = await get_run(session, rid)
     # IDOR fix: principal must have access to the project this Run belongs to
-    principal = Principal(id=user_id, kind=PrincipalKind.user, scopes=frozenset({ApiScope.read}))
     await assert_project_access(session, principal, run.project_id)
     offset = (page - 1) * per_page
     results = await list_results(session, rid, limit=per_page, offset=offset)

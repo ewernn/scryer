@@ -41,14 +41,20 @@ _ROLE_RANK = {
 async def _assert_sa_workspace(
     session: AsyncSession, sa_id: uuid.UUID, workspace_id: uuid.UUID
 ) -> ServiceAccount:
-    """Look up the ServiceAccount and verify it belongs to `workspace_id`.
+    """Look up the ServiceAccount and verify it belongs to `workspace_id`
+    AND that the workspace itself is still active (not archived).
 
-    Raises NotFoundError (not PermissionError) on mismatch to avoid
-    existence oracle. ServiceAccount.workspace_id is set at create time
-    and CASCADE-deleted with the workspace, so SA's workspace is intrinsic
-    — no separate membership table."""
+    Raises NotFoundError (not PermissionError) on mismatch / archived to
+    avoid existence oracle. ServiceAccount.workspace_id is set at create
+    time and CASCADE-deleted with the workspace, but soft-deletion
+    (workspace.archived_at) doesn't propagate — the SA row would still
+    match without the workspace check below, leaving SAs authenticating
+    against an archived workspace."""
     sa = await session.get(ServiceAccount, sa_id)
     if sa is None or sa.archived_at is not None or sa.workspace_id != workspace_id:
+        raise NotFoundError("workspace", str(workspace_id))
+    ws = await session.get(Workspace, workspace_id)
+    if ws is None or ws.archived_at is not None:
         raise NotFoundError("workspace", str(workspace_id))
     if not sa.is_active:
         raise PermissionError("ServiceAccount is deactivated")
