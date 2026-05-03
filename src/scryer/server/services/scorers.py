@@ -29,6 +29,9 @@ async def push_scorer(
     server_executable: bool = True,
 ) -> Scorer:
     version, parent_id = await next_version(session, Scorer, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Scorer.content_hash): source_text + server_executable.
+    # Changing fields here is a breaking change to dedup identity — see
+    # tests/test_content_hash_stability.py for the lock-in test.
     h = content_hash({"source_text": source_text, "server_executable": server_executable})
     s = Scorer(
         project_id=project_id,

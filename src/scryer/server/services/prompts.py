@@ -30,6 +30,9 @@ async def push_prompt(
     description: str | None = None,
 ) -> Prompt:
     version, parent_id = await next_version(session, Prompt, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Prompt.content_hash): template + template_format.value
+    # (string form of enum). template_format is intrinsic — changes how the
+    # template is rendered. Lock-in test: tests/test_content_hash_stability.py.
     h = content_hash({"template": template, "template_format": template_format.value})
     p = Prompt(
         project_id=project_id,

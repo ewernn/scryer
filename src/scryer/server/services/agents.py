@@ -30,6 +30,9 @@ async def push_agent(
     config_json: dict[str, Any] | None = None,
 ) -> Agent:
     version, parent_id = await next_version(session, Agent, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Agent.content_hash): source_text + config_json.
+    # config_json is intrinsic — affects agent behavior (model, temperature).
+    # Lock-in test: tests/test_content_hash_stability.py.
     h = content_hash({"source_text": source_text, "config_json": config_json})
     a = Agent(
         project_id=project_id,

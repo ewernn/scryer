@@ -31,6 +31,9 @@ async def push_tool(
     sandbox_required: bool = False,
 ) -> Tool:
     version, parent_id = await next_version(session, Tool, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Tool.content_hash): source_text + schema_json +
+    # sandbox_required. Schema defines callable signature; sandbox_required
+    # is intrinsic security property. Lock-in: tests/test_content_hash_stability.py.
     h = content_hash(
         {
             "source_text": source_text,

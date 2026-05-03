@@ -53,6 +53,13 @@ async def push_task(
         await _check_version(session, Prompt, prompt_id, prompt_version, "prompt")
 
     version, parent_id = await next_version(session, Task, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Task.content_hash): references-not-content.
+    # Hashes the bound child (id, version) pairs + params_json. Git-style:
+    # a Task is a "commit" pinning specific child versions. Identity IS
+    # those references, NOT the children's contents. Changing
+    # dataset_version from 2 to 3 is a different Task even if both versions
+    # of the dataset have the same content_hash.
+    # Lock-in test: tests/test_content_hash_stability.py.
     h = content_hash(
         {
             "dataset_id": str(dataset_id),

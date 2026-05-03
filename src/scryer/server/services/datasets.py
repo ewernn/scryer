@@ -40,6 +40,9 @@ async def push_dataset(
         raise ConflictError("Dataset must contain at least one record")
 
     version, parent_id = await next_version(session, Dataset, project_id=project_id, slug=slug)
+    # FROZEN CONTRACT (Dataset.content_hash): schema_json + records.
+    # name/description/record_count are metadata (excluded). Lock-in test:
+    # tests/test_content_hash_stability.py.
     h = content_hash(
         {
             "schema_json": schema_json,
