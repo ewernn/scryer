@@ -101,37 +101,43 @@ async def healthz_deep(request: Request, response: Response) -> DeepHealthRespon
                         detail=f"alembic head is {row!r}, expected {EXPECTED_MIGRATION_HEAD!r}",
                     )
 
-                # FALSE-LOW BY DESIGN — this endpoint reads via the public
-                # app engine which is RLS-gated; with no current_workspace_id
-                # GUC set, FORCE RLS returns zero rows for both queries
-                # below. Real per-workspace queue depth + stale-run counts
-                # require either a privileged BYPASSRLS engine or a
-                # per-workspace iteration loop (mirroring api/internal.py).
-                # Both are larger-scope work; for now this probe only
-                # surfaces queue/stale problems if the data tables briefly
-                # bypass RLS (e.g. during a downgrade), and we accept the
-                # false-low for now. Tracked in scryer_notepad.md.
-                pending = await conn.execute(
-                    text(
-                        "SELECT count(*) FROM webhook_deliveries "
-                        "WHERE status IN ('pending', 'failed') AND next_attempt_at < now()"
-                    )
+                # webhook_deliveries + runs are RLS-policied; iterate per
+                # workspace and aggregate. workspaces table itself is not
+                # RLS-policied so the listing is allowed without GUC.
+                # Same pattern as api/internal.py cron paths.
+                ws_rows = await conn.execute(
+                    text("SELECT id FROM workspaces WHERE archived_at IS NULL")
                 )
-                n_pending = pending.scalar_one()
+                ws_ids = [r[0] for r in ws_rows.all()]
+
+                cutoff = datetime.now(UTC) - timedelta(seconds=STALE_RUN_GRACE_SECONDS)
+                n_pending = 0
+                n_stale = 0
+                for ws_id in ws_ids:
+                    await conn.execute(
+                        text("SELECT set_config('app.current_workspace_id', :w, true)"),
+                        {"w": str(ws_id)},
+                    )
+                    pending = await conn.execute(
+                        text(
+                            "SELECT count(*) FROM webhook_deliveries "
+                            "WHERE status IN ('pending', 'failed') AND next_attempt_at < now()"
+                        )
+                    )
+                    n_pending += pending.scalar_one()
+                    stale = await conn.execute(
+                        text(
+                            "SELECT count(*) FROM runs "
+                            "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
+                        ),
+                        {"cutoff": cutoff},
+                    )
+                    n_stale += stale.scalar_one()
+
                 if n_pending > 100:
                     queue_check = CheckResult(
                         ok=False, detail=f"{n_pending} pending webhook deliveries past due"
                     )
-
-                cutoff = datetime.now(UTC) - timedelta(seconds=STALE_RUN_GRACE_SECONDS)
-                stale = await conn.execute(
-                    text(
-                        "SELECT count(*) FROM runs "
-                        "WHERE status = 'running' AND last_heartbeat_at < :cutoff"
-                    ),
-                    {"cutoff": cutoff},
-                )
-                n_stale = stale.scalar_one()
                 if n_stale > 0:
                     stale_check = CheckResult(
                         ok=False,
