@@ -27,6 +27,13 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://scryer:scryer@localhost:5432/scryer",
         description="Async SQLAlchemy URL. Neon Postgres in prod.",
     )
+    # Pool sized for Neon -pooler (PgBouncer transaction mode), which
+    # multiplexes many SQLAlchemy connections onto fewer server backends.
+    # If DATABASE_URL points at a non-pooler host, drop these significantly.
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    db_pool_timeout: int = 30  # seconds before giving up on a free conn
+    db_pool_recycle: int = 1800  # seconds; sidesteps Neon idle-disconnect
 
     r2_endpoint: str = ""
     r2_access_key_id: str = ""

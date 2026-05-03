@@ -31,6 +31,57 @@ async def _ws(session: AsyncSession, owner_id):
     )
 
 
+async def test_redeem_survives_personal_workspace_slug_collision(
+    session: AsyncSession,
+) -> None:
+    """Regression: previously, a slug collision on personal workspace creation
+    triggered `session.rollback()` which wiped the freshly-created User row.
+    With nested savepoints, only the failed slug attempt rolls back; the
+    parent transaction survives so the User and the eventually-allocated
+    workspace both persist."""
+    owner = await _user(session)
+    ws = await _ws(session, owner.id)
+
+    # Pre-occupy the first 2 personal-slug candidates so signup must
+    # walk the suffix list and recover from collisions.
+    invitee_email = f"collide{uuid4().hex[:8]}@example.com"
+    base_slug = invitee_email.split("@", 1)[0].lower().replace("_", "-")
+    base = "".join(c if c.isalnum() else "-" for c in base_slug).strip("-") or "user"
+    for suffix in ("", "-2"):
+        await create_workspace(
+            session,
+            slug=f"{base}-personal{suffix}"[:64],
+            name="squatter",
+            owner_user_id=owner.id,
+        )
+
+    inv, full_token = await create_invitation(
+        session,
+        workspace_id=ws.id,
+        workspace_role=WorkspaceRole.member,
+        invited_by=owner.id,
+        email=invitee_email,
+    )
+    user, _redeemed = await redeem_invitation(
+        session,
+        full_token=full_token,
+        email=invitee_email,
+        password="x" * 16,
+    )
+    # User row must still exist (was getting wiped by the rollback bug).
+    assert user.id is not None
+    assert user.email == invitee_email
+    # Personal workspace must have landed on suffix "-3" (first two were taken).
+    rows = list(
+        (
+            await session.execute(select(Workspace).where(Workspace.owner_user_id == user.id))
+        ).scalars()
+    )
+    assert any(w.slug.endswith("-personal-3") for w in rows), (
+        f"expected -personal-3 suffix, got slugs: {[w.slug for w in rows]}"
+    )
+
+
 async def test_create_invitation_happy_path(session: AsyncSession) -> None:
     owner = await _user(session)
     ws = await _ws(session, owner.id)

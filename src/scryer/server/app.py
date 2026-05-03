@@ -44,7 +44,7 @@ from scryer.server.services.errors import ScryerError
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    engine = build_engine(settings.database_url)
+    engine = build_engine(settings.database_url, settings)
     app.state.engine = engine
     app.state.session_factory = build_session_factory(engine)
     try:

@@ -190,21 +190,27 @@ async def _create_personal_workspace(
     display_name: str | None,
     user_id: uuid.UUID,
 ) -> Any:
-    """Create personal workspace; on slug collision append numeric suffix."""
+    """Create personal workspace; on slug collision append numeric suffix.
+
+    Each attempt runs in a SAVEPOINT (`begin_nested`). A failed attempt rolls
+    back ONLY the savepoint, preserving the outer transaction's writes
+    (User row, WorkspaceMember from invite redemption, etc.). The previous
+    implementation called `session.rollback()` which wiped the entire
+    signup transaction on first collision."""
     base = _personal_slug_base(email)
     last_exc: Exception | None = None
     for suffix in ("", "-2", "-3", "-4", "-5"):
         slug = f"{base}{suffix}"[:64]
         try:
-            return await create_workspace(
-                session,
-                slug=slug,
-                name=f"{display_name or email}'s workspace",
-                owner_user_id=user_id,
-            )
+            async with session.begin_nested():
+                return await create_workspace(
+                    session,
+                    slug=slug,
+                    name=f"{display_name or email}'s workspace",
+                    owner_user_id=user_id,
+                )
         except ConflictError as exc:
             last_exc = exc
-            await session.rollback()  # clear failed savepoint state
             continue
     raise ConflictError(f"Could not allocate personal workspace slug for {email}") from last_exc
 

@@ -18,9 +18,20 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from scryer.config import Settings, get_settings
 
-def build_engine(database_url: str) -> AsyncEngine:
-    return create_async_engine(database_url, echo=False, pool_pre_ping=True)
+
+def build_engine(database_url: str, settings: Settings | None = None) -> AsyncEngine:
+    s = settings or get_settings()
+    return create_async_engine(
+        database_url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=s.db_pool_size,
+        max_overflow=s.db_max_overflow,
+        pool_timeout=s.db_pool_timeout,
+        pool_recycle=s.db_pool_recycle,
+    )
 
 
 def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
