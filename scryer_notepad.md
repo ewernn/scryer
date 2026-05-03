@@ -8,12 +8,9 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `c4f2e1b9a3d5` (ENABLE + FORCE RLS on data
-  tables) — shipped 2026-05-03 and Phase 1c-2 follow-ups landed:
-  apply_workspace_context primitive + cron iterates per-workspace +
-  /runs nested under /workspaces/{slug} + write_event self-applies
-  audit context.
-- **Tests**: 167 passing in ~21s, includes 4 RLS enforcement tests via
+- **Migration head in prod**: `d8a719c5b2e7` (slug history triggers,
+  shipped 2026-05-03)
+- **Tests**: 169 passing in ~20s, includes 4 RLS enforcement tests via
   `rls_session` (scryer_app role, RLS-gated)
 - **Active wave**: pick next from the queue below
 
@@ -29,23 +26,34 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 ## Remaining queue (high-level)
 
 ```
-□ Phase 1c-2     — RLS gap-fixes after critic audit:
-                   - /runs routes need apply_workspace_context
-                     (Task/Run/Result tables RLS'd; URL has no slug)
-                   - cron paths (deliver-webhooks, dispatch-triggers,
-                     reap-stale-runs) need privileged engine OR per-ws iter
-                   - audit_events INSERT footgun: write_event with
-                     workspace_id != current GUC raises (consider applying
-                     context inside write_event)
-□ P1 Phase 2     — webhooks lease refactor, RLS-aware (paired with above)
+☑ Phase 1c       — ENABLE+FORCE RLS, migration c4f2e1b9a3d5 in prod
+☑ Phase 1c-2     — apply_workspace_context primitive, cron per-ws iter,
+                   /runs nested URLs, write_event self-applies, /me fix
+☑ P1 Phase 2     — webhook lease refactor (covered by Phase 1c-2 cron)
+☑ R2             — slug history triggers, migration d8a719c5b2e7 in prod
+☑ Q part         — drop Sunset header + /healthz/deep done; D2 cursor
+                   pagination still pending
 □ P1 Phase 4     — cascade-down soft-delete + idempotency_keys table
 □ R1             — audit auto-emission via SQLAlchemy listeners
-□ R2             — slug history as DB trigger
+                   (LOW PRIORITY — only 5 callsites today, hand-written
+                   audit gives better action labels than auto-listener)
 □ R4             — finish ServiceAccount as first-class principal
+                   (extend assert_workspace_member, CLI command,
+                   end-to-end test)
 □ P3             — outbox table only (Procrastinate deferred)
-□ Q              — cursor pagination on every list endpoint,
-                   /healthz/deep, drop Sunset header
+□ Q D2           — cursor pagination on every list endpoint (~6-8h)
 ```
+
+## Phase 1c-2 follow-up gaps still tracked
+
+These were called out by the post-Phase-1c critic but partly mitigated by
+later commits — leaving here as breadcrumbs for the next deep look:
+
+- /healthz/deep webhook + stale checks read via the public engine and
+  return false-low under FORCE RLS (no GUC set). Either add a privileged
+  engine helper for the probe, or per-workspace aggregate.
+- Trigger functions live in the `public` schema. Move to a dedicated
+  `scryer_internal` schema for namespacing when convenient.
 
 ## Locked decisions (don't re-litigate)
 
