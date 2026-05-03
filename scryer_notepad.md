@@ -8,13 +8,12 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `a1b2c3d4e5f6` (idempotency_keys table).
-  Recent migrations on `main`: f3c5d8e0a712 (time-as-DB-truth),
-  e9f1a4c8b3d6 (audit_events strict isolation), d8a719c5b2e7 (slug
-  history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
-- **Tests**: 185 passing in ~22s
-- **Active wave**: Wave 2+5 BUNDLED (cascade-down soft-delete +
-  archived_at-as-RLS-predicate) — see "Wave 2+5 NEXT" below
+- **Migration head in prod**: `9db64f8a534b` (cascade-down soft-delete +
+  archived_at RLS). Recent: a1b2c3d4e5f6 (idempotency_keys), f3c5d8e0a712
+  (time-as-DB-truth), e9f1a4c8b3d6 (audit_events strict isolation),
+  d8a719c5b2e7 (slug history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
+- **Tests**: 194 passing in ~24s
+- **Active wave**: Wave 3 PID-tracking cancellation — see below
 
 ## Wave 1 SHIPPED (2026-05-03 evening)
 
@@ -29,35 +28,21 @@ test_idempotency.py. To wire on more endpoints later: add
 background_tasks: BackgroundTasks` params + before-return call to
 `capture_idempotency_response(...)`.
 
-## Wave 2+5 NEXT — cascade-down + archived_at RLS (BUNDLED)
+## Wave 2+5 SHIPPED (2026-05-03 morning)
 
-CRITIC BLOCKER from scope-out: must bundle. Adding `archived_at IS
-NULL` to USING without explicit `WITH CHECK (workspace_id only)`
-breaks every soft-delete UPDATE.
+Cascade-down soft-delete from workspaces + archived_at-as-RLS-predicate
+in migration `9db64f8a534b`. 9 tests in test_archive_workspace.py.
+DELETE /workspaces/{slug} endpoint owner-only + idempotent.
 
-Implementation per agent specs (in `notepad/wave_2_5_plan.md` if
-written; otherwise from scope-out report in conversation history):
-
-1. New migration:
-   a. ADD COLUMN webhooks.archived_at if missing
-   b. CREATE FUNCTION _trgfn_cascade_archive_workspace() — fans
-      out archived_at from workspace to projects + service_accounts
-      + credentials + budgets + webhooks via bulk UPDATE WHERE
-      workspace_id=NEW.id AND archived_at IS NULL
-   c. CREATE TRIGGER on workspaces AFTER UPDATE OF archived_at
-      WHEN (NEW.archived_at IS NOT NULL AND OLD.archived_at IS NULL)
-   d. DROP+CREATE policy on 8 SoftDelete RLS tables (datasets,
-      scorers, agents, tools, prompts, tasks, projects, credentials):
-      USING (ws=guc AND (archived_at IS NULL OR
-             current_setting('app.include_archived', true) = 'true'))
-      WITH CHECK (ws=guc)
-2. archive_workspace service in services/workspaces.py — sets
-   archived_at + bulk UPDATE Run.status='cancelled' for queued/running
-3. DELETE /workspaces/{slug} endpoint — owner-only, idempotent (re-
-   archive returns 204 because trigger WHERE filters)
-4. apply_workspace_context gains optional include_archived kwarg;
-   _set_rls_context emits set_config('app.include_archived', ..., true)
-5. Tests: cascade reach + RLS hide + USING/WITH CHECK split verification
+**Key learning, recorded for future migrations:** PG evaluates the
+SELECT/USING expression against the *post-row* of every UPDATE — not
+just WITH CHECK. The cascade trigger sets `app.include_archived='true'`
+at function entry so its UPDATE-archive cascade UPDATEs pass the
+post-row visibility check (otherwise USING with `archived_at IS NULL OR
+include_archived='true'` rejects archived NEW rows). Two-part fix:
+USING/WITH CHECK split + include_archived inside trigger. Service code
+(archive_workspace) also sets include_archived=true via
+apply_workspace_context for defense-in-depth.
 
 ## Wave 3 NEXT-NEXT — PID-tracking cancellation
 

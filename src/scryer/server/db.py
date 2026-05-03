@@ -53,7 +53,8 @@ def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessio
 
 @event.listens_for(Session, "after_begin")
 def _set_rls_context(session, transaction, connection) -> None:  # type: ignore[no-untyped-def]
-    """SET LOCAL app.current_{workspace,user}_id at every transaction start.
+    """SET LOCAL app.current_{workspace,user}_id + app.include_archived at
+    every transaction start.
 
     Module-level listener on Session — fires for every session in the
     process. Each branch is conditional on the corresponding session.info
@@ -75,6 +76,8 @@ def _set_rls_context(session, transaction, connection) -> None:  # type: ignore[
             text("SELECT set_config('app.current_user_id', :uid, true)"),
             {"uid": str(user_id)},
         )
+    if session.info.get("include_archived"):
+        connection.execute(text("SELECT set_config('app.include_archived', 'true', true)"))
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -94,6 +97,7 @@ async def apply_workspace_context(
     workspace_id: str | object,
     *,
     user_id: str | object | None = None,
+    include_archived: bool = False,
 ) -> None:
     """Apply RLS GUCs to the session's CURRENT transaction immediately AND
     stash in session.info for any future transactions.
@@ -105,6 +109,12 @@ async def apply_workspace_context(
     opened a session; signup creates a personal workspace partway through
     the request), call this instead of just mutating session.info — that
     mutation alone won't reach the open transaction's SET LOCAL.
+
+    Pass `include_archived=True` for admin-style queries that need to read
+    soft-deleted rows (workspace dashboards listing archived projects, the
+    archive_workspace flow that touches both states). Sets
+    `app.include_archived='true'`, which the policy USING clauses on the
+    SoftDelete RLS tables read via current_setting().
 
     Idempotent: safe to call repeatedly, including after the listener has
     already fired with the same value."""
@@ -119,6 +129,9 @@ async def apply_workspace_context(
             text("SELECT set_config('app.current_user_id', :uid, true)"),
             {"uid": str(user_id)},
         )
+    if include_archived:
+        session.info["include_archived"] = True
+        await session.execute(text("SELECT set_config('app.include_archived', 'true', true)"))
 
 
 @asynccontextmanager
@@ -127,12 +140,15 @@ async def with_workspace_context(
     workspace_id: str | object,
     *,
     user_id: str | object | None = None,
+    include_archived: bool = False,
 ) -> AsyncIterator[None]:
     """Async ctx-mgr wrapper around `apply_workspace_context` for non-HTTP
     callers (cron workers, tests, internal scripts). Sets the GUC for the
     enclosed block; subsequent transactions in the same session inherit
     via session.info."""
-    await apply_workspace_context(session, workspace_id, user_id=user_id)
+    await apply_workspace_context(
+        session, workspace_id, user_id=user_id, include_archived=include_archived
+    )
     try:
         yield
     finally:

@@ -35,7 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from scryer.server.models.base import Base, TimestampMixin
+from scryer.server.models.base import Base, SoftDeleteMixin, TimestampMixin
 from scryer.server.models.enums import (
     ActorKind,
     MissedFirePolicy,
@@ -226,7 +226,7 @@ class Trigger(Base, TimestampMixin):
 # ── webhooks ────────────────────────────────────────────────────────────────
 
 
-class Webhook(Base, TimestampMixin):
+class Webhook(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "webhooks"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

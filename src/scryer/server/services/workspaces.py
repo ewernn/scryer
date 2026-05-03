@@ -1,16 +1,18 @@
-"""Workspace service: create, list, slug history."""
+"""Workspace service: create, list, slug history, archive."""
 
 from __future__ import annotations
 
 import re
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.models.auth import Workspace, WorkspaceMember, WorkspaceSlug
-from scryer.server.models.enums import WorkspaceRole
+from scryer.server.models.enums import RunStatus, WorkspaceRole
+from scryer.server.models.eval import Run
 from scryer.server.services.errors import ConflictError, NotFoundError
 
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -161,3 +163,43 @@ async def list_workspaces_for_user(session: AsyncSession, user_id: uuid.UUID) ->
     )
     result = await session.execute(stmt)
     return list(result.scalars())
+
+
+async def archive_workspace(session: AsyncSession, workspace_id: uuid.UUID) -> Workspace:
+    """Soft-delete a workspace + cascade to children + cancel in-flight runs.
+
+    The DB trigger `trg_workspace_cascade_archive` (migration 9db64f8a534b)
+    fans archived_at out to projects, service_accounts, credentials, budgets,
+    and webhooks. Versioned children (datasets, scorers, etc.) descend
+    through projects so the policy USING clause hides them via the
+    archived_at predicate without requiring a 2-hop trigger.
+
+    Idempotent: re-archiving an already-archived workspace returns the
+    existing row unchanged. The trigger WHEN clause prevents the cascade
+    fanout from firing twice.
+
+    In-flight Runs (queued, running) are cancelled in bulk here — that's
+    an executor concern (the DB doesn't know which runs to interrupt), not
+    a trigger one. The cancellation is best-effort: a Run that's currently
+    executing on a worker won't actually halt until Wave 3 PID-tracking
+    lands; status='cancelled' will be observed at the next cooperative
+    check between records."""
+    ws = await session.get(Workspace, workspace_id)
+    if ws is None:
+        raise NotFoundError("workspace", str(workspace_id))
+    if ws.archived_at is not None:
+        # Idempotent — caller treats this as success without re-firing.
+        return ws
+
+    ws.archived_at = datetime.now(UTC)
+    await session.flush()  # triggers cascade to projects/SA/credentials/budgets/webhooks
+
+    await session.execute(
+        update(Run)
+        .where(
+            Run.workspace_id == workspace_id,
+            Run.status.in_([RunStatus.queued, RunStatus.running]),
+        )
+        .values(status=RunStatus.cancelled, completed_at=datetime.now(UTC))
+    )
+    return ws
