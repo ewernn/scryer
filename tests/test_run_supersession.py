@@ -17,6 +17,7 @@ from scryer.server.services.scorers import push_scorer
 from scryer.server.services.tasks import push_task
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def _setup_task(session: AsyncSession) -> tuple:
@@ -75,18 +76,21 @@ async def test_supersede_marks_prior_queued_runs(session: AsyncSession) -> None:
         supersede=True,
     )
     await session.flush()
-    rows = list(
-        (
-            await session.execute(select(Run).where(Run.task_id == task_id).order_by(Run.queued_at))
-        ).scalars()
-    )
-    assert len(rows) == 3
-    assert rows[0].status == RunStatus.superseded
-    assert rows[0].failure_reason == "superseded"
-    assert rows[0].completed_at is not None
-    assert rows[1].status == RunStatus.superseded
-    assert rows[2].id == r3.id
-    assert rows[2].status == RunStatus.queued
+    async with workspace_context(session, ws_id):
+        rows = list(
+            (
+                await session.execute(
+                    select(Run).where(Run.task_id == task_id).order_by(Run.queued_at)
+                )
+            ).scalars()
+        )
+        assert len(rows) == 3
+        assert rows[0].status == RunStatus.superseded
+        assert rows[0].failure_reason == "superseded"
+        assert rows[0].completed_at is not None
+        assert rows[1].status == RunStatus.superseded
+        assert rows[2].id == r3.id
+        assert rows[2].status == RunStatus.queued
 
 
 async def test_no_supersede_leaves_priors_alone(session: AsyncSession) -> None:

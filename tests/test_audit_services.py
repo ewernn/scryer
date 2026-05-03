@@ -33,7 +33,6 @@ from scryer.server.services.usage import (
 )
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
-
 from tests.conftest import workspace_context
 
 
@@ -165,9 +164,7 @@ async def test_suite_execute_runs_all_tasks(session: AsyncSession) -> None:
         await add_task_to_suite(session, suite_id=suite.id, task_id=t1.id, position=1)
         await add_task_to_suite(session, suite_id=suite.id, task_id=t2.id, position=2)
 
-        sr = await execute_suite(
-            session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id
-        )
+        sr = await execute_suite(session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id)
         assert sr.completed_at is not None
         runs = await list_runs_in_suite(session, sr.id)
         assert len(runs) == 2

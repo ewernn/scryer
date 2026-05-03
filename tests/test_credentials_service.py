@@ -17,6 +17,7 @@ from scryer.server.services.credentials import (
 from scryer.server.services.errors import PermissionError
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def _user(session: AsyncSession):
@@ -41,8 +42,9 @@ async def test_add_credential_round_trips(session: AsyncSession) -> None:
         plaintext_value=plaintext,
     )
     assert cred.encrypted_value != plaintext
-    decrypted = await decrypt_for_user(session, cred_id=cred.id, user_id=owner.id)
-    assert decrypted == plaintext
+    async with workspace_context(session, ws.id):
+        decrypted = await decrypt_for_user(session, cred_id=cred.id, user_id=owner.id)
+        assert decrypted == plaintext
 
 
 async def test_decrypt_restricted_users_enforces(session: AsyncSession) -> None:
@@ -58,10 +60,11 @@ async def test_decrypt_restricted_users_enforces(session: AsyncSession) -> None:
         plaintext_value="sk-ant-secret",
         restricted_to_user_ids=[allowed.id],
     )
-    pt = await decrypt_for_user(session, cred_id=cred.id, user_id=allowed.id)
-    assert pt == "sk-ant-secret"
-    with pytest.raises(PermissionError):
-        await decrypt_for_user(session, cred_id=cred.id, user_id=other.id)
+    async with workspace_context(session, ws.id):
+        pt = await decrypt_for_user(session, cred_id=cred.id, user_id=allowed.id)
+        assert pt == "sk-ant-secret"
+        with pytest.raises(PermissionError):
+            await decrypt_for_user(session, cred_id=cred.id, user_id=other.id)
 
 
 async def test_archive_credential_filters_out(session: AsyncSession) -> None:
@@ -75,5 +78,6 @@ async def test_archive_credential_filters_out(session: AsyncSession) -> None:
         plaintext_value="sk-x",
     )
     await archive_credential(session, cred.id)
-    remaining = await list_credentials(session, ws.id)
-    assert all(c.id != cred.id for c in remaining)
+    async with workspace_context(session, ws.id):
+        remaining = await list_credentials(session, ws.id)
+        assert all(c.id != cred.id for c in remaining)

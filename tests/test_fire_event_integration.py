@@ -18,6 +18,7 @@ from scryer.server.services.tasks import push_task
 from scryer.server.services.users import create_user
 from scryer.server.services.webhooks import create_webhook
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def test_completed_run_queues_webhook_delivery(session: AsyncSession) -> None:
@@ -72,19 +73,20 @@ async def test_completed_run_queues_webhook_delivery(session: AsyncSession) -> N
     assert run.status.value == "done"
 
     # fire_event should have queued one delivery for our webhook.
-    deliveries = list(
-        (
-            await session.execute(
-                select(WebhookDelivery).where(WebhookDelivery.webhook_id == wh.id)
-            )
-        ).scalars()
-    )
-    assert len(deliveries) == 1
-    d = deliveries[0]
-    assert d.event_type == "run.done"
-    assert d.payload_json["run_id"] == str(run.id)
-    assert d.payload_json["status"] == "done"
-    assert d.payload_json["n_done"] == 1
+    async with workspace_context(session, ws.id):
+        deliveries = list(
+            (
+                await session.execute(
+                    select(WebhookDelivery).where(WebhookDelivery.webhook_id == wh.id)
+                )
+            ).scalars()
+        )
+        assert len(deliveries) == 1
+        d = deliveries[0]
+        assert d.event_type == "run.done"
+        assert d.payload_json["run_id"] == str(run.id)
+        assert d.payload_json["status"] == "done"
+        assert d.payload_json["n_done"] == 1
 
 
 async def test_webhook_not_subscribed_no_delivery(session: AsyncSession) -> None:
@@ -136,11 +138,12 @@ async def test_webhook_not_subscribed_no_delivery(session: AsyncSession) -> None
     run = await queue_run(session, task_id=t.id, workspace_id=ws.id, project_id=proj.id)
     await execute_run(session, run_id=run.id)
 
-    deliveries = list(
-        (
-            await session.execute(
-                select(WebhookDelivery).where(WebhookDelivery.webhook_id == wh.id)
-            )
-        ).scalars()
-    )
-    assert deliveries == []
+    async with workspace_context(session, ws.id):
+        deliveries = list(
+            (
+                await session.execute(
+                    select(WebhookDelivery).where(WebhookDelivery.webhook_id == wh.id)
+                )
+            ).scalars()
+        )
+        assert deliveries == []

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +18,7 @@ from scryer.server.models.eval import (
 )
 from scryer.server.services.errors import ConflictError, NotFoundError
 from scryer.server.services.sandbox import SandboxError, run_user_code
+from scryer.server.services.scorer_output import parse_scorer_output
 
 HEARTBEAT_INTERVAL_S = 30
 
@@ -140,12 +140,14 @@ async def execute_run(
                 },
             )
             payload = sandbox_result.output
+            score_value, schema_error = parse_scorer_output(payload)
             session.add(
                 Result(
                     run_id=run.id,
                     record_id=rec.record_id,
-                    score_value=_coerce_score(payload),
+                    score_value=score_value,
                     score_json=payload,
+                    error=schema_error,
                     duration_ms=sandbox_result.duration_ms,
                 )
             )
@@ -216,16 +218,11 @@ async def execute_run(
     return run
 
 
-def _coerce_score(payload: dict[str, Any]) -> float | None:
-    """Pull a numeric score out of common Scorer return shapes."""
-    if not isinstance(payload, dict):
-        return None
-    for key in ("score", "value", "result"):
-        if key in payload:
-            v = payload[key]
-            if isinstance(v, (int, float)):
-                return float(v)
-    return None
+# _coerce_score replaced by parse_scorer_output (services/scorer_output.py).
+# Old behavior silently stored score_value=NULL when Scorer returned a dict
+# with the numeric under any key other than score/value/result. New behavior
+# returns (score_value, error) — non-conforming returns are recorded as
+# explicit errors instead of silent NULLs.
 
 
 async def get_run(session: AsyncSession, run_id: uuid.UUID) -> Run:

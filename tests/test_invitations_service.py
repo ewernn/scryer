@@ -19,6 +19,7 @@ from scryer.server.services.invitations import (
 )
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def _user(session: AsyncSession):
@@ -38,7 +39,12 @@ async def test_redeem_survives_personal_workspace_slug_collision(
     triggered `session.rollback()` which wiped the freshly-created User row.
     With nested savepoints, only the failed slug attempt rolls back; the
     parent transaction survives so the User and the eventually-allocated
-    workspace both persist."""
+    workspace both persist.
+
+    Cross-tenant: this test queries Workspace.owner_user_id across multiple
+    workspaces (the squatter workspaces + the redeemed personal one). Once
+    RLS lands, this select() needs the BYPASSRLS privileged_engine fixture.
+    For now we wrap with the inviter ws context (no-op until RLS lands)."""
     owner = await _user(session)
     ws = await _ws(session, owner.id)
 
@@ -72,14 +78,15 @@ async def test_redeem_survives_personal_workspace_slug_collision(
     assert user.id is not None
     assert user.email == invitee_email
     # Personal workspace must have landed on suffix "-3" (first two were taken).
-    rows = list(
-        (
-            await session.execute(select(Workspace).where(Workspace.owner_user_id == user.id))
-        ).scalars()
-    )
-    assert any(w.slug.endswith("-personal-3") for w in rows), (
-        f"expected -personal-3 suffix, got slugs: {[w.slug for w in rows]}"
-    )
+    async with workspace_context(session, ws.id):
+        rows = list(
+            (
+                await session.execute(select(Workspace).where(Workspace.owner_user_id == user.id))
+            ).scalars()
+        )
+        assert any(w.slug.endswith("-personal-3") for w in rows), (
+            f"expected -personal-3 suffix, got slugs: {[w.slug for w in rows]}"
+        )
 
 
 async def test_create_invitation_happy_path(session: AsyncSession) -> None:
@@ -116,21 +123,25 @@ async def test_redeem_invitation_creates_user_membership_personal_ws_default_pro
     assert user.email == new_email
     assert inv.used_by_user_id == user.id
 
-    members = await session.execute(
-        select(WorkspaceMember).where(
-            WorkspaceMember.workspace_id == ws.id, WorkspaceMember.user_id == user.id
+    async with workspace_context(session, ws.id):
+        members = await session.execute(
+            select(WorkspaceMember).where(
+                WorkspaceMember.workspace_id == ws.id, WorkspaceMember.user_id == user.id
+            )
         )
-    )
-    assert members.scalar_one_or_none() is not None
+        assert members.scalar_one_or_none() is not None
 
-    personal = await session.execute(
-        select(Workspace).where(Workspace.owner_user_id == user.id, Workspace.id != ws.id)
-    )
-    personal_ws = personal.scalar_one()
-    default_proj = await session.execute(
-        select(Project).where(Project.workspace_id == personal_ws.id, Project.slug == "default")
-    )
-    assert default_proj.scalar_one() is not None
+        # Cross-tenant: querying for the new user's personal workspace which
+        # has a different workspace_id. Once RLS lands this needs splitting
+        # or privileged engine. Wrapping in inviter ws context is a no-op now.
+        personal = await session.execute(
+            select(Workspace).where(Workspace.owner_user_id == user.id, Workspace.id != ws.id)
+        )
+        personal_ws = personal.scalar_one()
+        default_proj = await session.execute(
+            select(Project).where(Project.workspace_id == personal_ws.id, Project.slug == "default")
+        )
+        assert default_proj.scalar_one() is not None
 
 
 async def test_redeem_invitation_email_mismatch_raises(session: AsyncSession) -> None:

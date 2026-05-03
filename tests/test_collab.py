@@ -33,6 +33,7 @@ from scryer.server.services.scorers import push_scorer
 from scryer.server.services.tasks import push_task
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def _setup(session: AsyncSession):
@@ -73,7 +74,7 @@ async def test_write_system_comment_no_author(session: AsyncSession) -> None:
 
 
 async def test_edit_comment_archives_previous_body(session: AsyncSession) -> None:
-    user, _, proj = await _setup(session)
+    user, ws, proj = await _setup(session)
     c = await write_comment(session, project_id=proj.id, body="v1", author_user_id=user.id)
     edited = await edit_comment(
         session,
@@ -88,13 +89,14 @@ async def test_edit_comment_archives_previous_body(session: AsyncSession) -> Non
 
     from scryer.server.models.collab import CommentVersion
 
-    versions = (
-        (await session.execute(select(CommentVersion).where(CommentVersion.comment_id == c.id)))
-        .scalars()
-        .all()
-    )
-    assert len(versions) == 1
-    assert versions[0].body == "v1"
+    async with workspace_context(session, ws.id):
+        versions = (
+            (await session.execute(select(CommentVersion).where(CommentVersion.comment_id == c.id)))
+            .scalars()
+            .all()
+        )
+        assert len(versions) == 1
+        assert versions[0].body == "v1"
 
 
 async def test_cannot_edit_system_comment(session: AsyncSession) -> None:
@@ -105,7 +107,7 @@ async def test_cannot_edit_system_comment(session: AsyncSession) -> None:
 
 
 async def test_list_comments_for_resource(session: AsyncSession) -> None:
-    user, _, proj = await _setup(session)
+    user, ws, proj = await _setup(session)
     rid = uuid4()
     await write_comment(
         session,
@@ -123,12 +125,13 @@ async def test_list_comments_for_resource(session: AsyncSession) -> None:
         resource_type="run",
         resource_id=rid,
     )
-    rows = await list_comments_for_resource(session, resource_type="run", resource_id=rid)
-    assert {r.body for r in rows} == {"a", "b"}
+    async with workspace_context(session, ws.id):
+        rows = await list_comments_for_resource(session, resource_type="run", resource_id=rid)
+        assert {r.body for r in rows} == {"a", "b"}
 
 
 async def test_collection_create_and_add_member(session: AsyncSession) -> None:
-    _, _, proj = await _setup(session)
+    _, ws, proj = await _setup(session)
     coll = await create_collection(
         session,
         project_id=proj.id,
@@ -147,12 +150,13 @@ async def test_collection_create_and_add_member(session: AsyncSession) -> None:
         group="failures",
         note="all 100 records failed",
     )
-    members = await list_members(session, coll.id)
-    assert len(members) == 1
-    assert members[0].group == "failures"
+    async with workspace_context(session, ws.id):
+        members = await list_members(session, coll.id)
+        assert len(members) == 1
+        assert members[0].group == "failures"
 
-    rows = await list_collections(session, proj.id)
-    assert len(rows) == 1
+        rows = await list_collections(session, proj.id)
+        assert len(rows) == 1
 
 
 @pytest.mark.slow
@@ -183,8 +187,11 @@ async def test_run_completion_writes_auto_comment(session: AsyncSession) -> None
     finished = await execute_run(session, run_id=run.id)
     assert finished.status == RunStatus.done
 
-    comments = await list_comments_for_resource(session, resource_type="run", resource_id=run.id)
-    assert len(comments) == 1
-    assert comments[0].kind == CommentKind.system
-    assert "done" in comments[0].body
-    assert comments[0].structured is not None
+    async with workspace_context(session, ws.id):
+        comments = await list_comments_for_resource(
+            session, resource_type="run", resource_id=run.id
+        )
+        assert len(comments) == 1
+        assert comments[0].kind == CommentKind.system
+        assert "done" in comments[0].body
+        assert comments[0].structured is not None

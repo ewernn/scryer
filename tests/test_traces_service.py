@@ -20,6 +20,7 @@ from scryer.server.services.tasks import push_task
 from scryer.server.services.traces import INLINE_THRESHOLD_BYTES, write_trace
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 pytestmark = pytest.mark.skipif(
     not get_settings().r2_endpoint or not get_settings().r2_access_key_id,
@@ -86,16 +87,17 @@ async def test_small_trace_stays_inline_with_step_rows(session: AsyncSession) ->
     assert trace.storage_uri is None
     assert trace.n_steps == 2
 
-    rows = list(
-        (
-            await session.execute(
-                select(TraceStep).where(TraceStep.trace_id == trace.id).order_by(TraceStep.seq)
-            )
-        ).scalars()
-    )
-    assert len(rows) == 2
-    assert rows[0].kind == "tool_call"
-    assert rows[1].payload_json == {"y": 2}
+    async with workspace_context(session, ws):
+        rows = list(
+            (
+                await session.execute(
+                    select(TraceStep).where(TraceStep.trace_id == trace.id).order_by(TraceStep.seq)
+                )
+            ).scalars()
+        )
+        assert len(rows) == 2
+        assert rows[0].kind == "tool_call"
+        assert rows[1].payload_json == {"y": 2}
 
 
 async def test_large_trace_spills_to_r2_no_step_rows(session: AsyncSession) -> None:
@@ -120,10 +122,13 @@ async def test_large_trace_spills_to_r2_no_step_rows(session: AsyncSession) -> N
     assert len(trace.storage_sha256) == 64
 
     # No TraceStep rows for spilled trace.
-    rows = list(
-        (await session.execute(select(TraceStep).where(TraceStep.trace_id == trace.id))).scalars()
-    )
-    assert rows == []
+    async with workspace_context(session, ws):
+        rows = list(
+            (
+                await session.execute(select(TraceStep).where(TraceStep.trace_id == trace.id))
+            ).scalars()
+        )
+        assert rows == []
 
     # Round-trip the R2 blob to confirm content matches.
     try:
