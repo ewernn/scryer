@@ -255,6 +255,12 @@ class WebhookDelivery(Base):
     webhook_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("webhooks.id", ondelete="CASCADE"), nullable=False
     )
+    # Cat 2: 1-hop denorm from webhooks. Populated by trigger
+    # _trgfn_workspace_from_webhook on INSERT/UPDATE; service code emits
+    # NULL and the trigger fills it.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     status: Mapped[WebhookDeliveryStatus] = mapped_column(

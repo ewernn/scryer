@@ -153,12 +153,18 @@ def upgrade() -> None:
     # (`postgres` locally, `neondb_owner` on Neon), so without FORCE RLS is
     # effectively a no-op. The privileged_engine fixture's `scryer_setup`
     # role uses BYPASSRLS to escape FORCE for cross-tenant test setup.
+    #
+    # NULLIF: an unset GUC returns NULL via current_setting(...,true), but
+    # an explicitly-set empty string ('') returns '' which fails the ::uuid
+    # cast. NULLIF normalizes both to NULL, which then fails the equality
+    # cleanly (= anything yields NULL → false → row denied).
+    _guc = "NULLIF(current_setting('app.current_workspace_id', true), '')::uuid"
     for table in _RLS_TABLES_NOT_NULL:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(
             f"CREATE POLICY {table}_workspace_isolation ON {table} "
-            f"USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid)"
+            f"USING (workspace_id = {_guc})"
         )
 
     for table in _RLS_TABLES_NULLABLE:
@@ -166,8 +172,7 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(
             f"CREATE POLICY {table}_workspace_isolation ON {table} "
-            f"USING (workspace_id IS NULL OR "
-            f"workspace_id = current_setting('app.current_workspace_id', true)::uuid)"
+            f"USING (workspace_id IS NULL OR workspace_id = {_guc})"
         )
 
 

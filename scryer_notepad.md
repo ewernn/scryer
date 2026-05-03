@@ -8,11 +8,12 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `99b59febc9c0` (denormalize workspace_id)
-- **RLS migration parked**: `migrations/draft/c4f2e1b9a3d5_enable_rls.py`
-  (validated via `make test-migrations`; awaiting Phase 1c bundle)
-- **Tests**: 159 passing in ~17s (docker postgres + alembic head)
-- **Active wave**: Phase 1c — see `notepad/phase_1c_checklist.md`
+- **Migration head in prod**: `99b59febc9c0` (denormalize workspace_id);
+  pushing `c4f2e1b9a3d5` (ENABLE + FORCE RLS) this iteration
+- **Tests**: 167 passing in ~21s — includes RLS enforcement tests via the
+  new `rls_session` fixture (scryer_app role, RLS-gated)
+- **Active wave**: Phase 1c shipping; remaining items are auditing other
+  service callers + extending RLS to auth tables in a follow-up
 
 ## Read order at every loop iteration
 

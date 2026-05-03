@@ -16,6 +16,7 @@ from scryer.server.models.auth import (
     User,
     WorkspaceMember,
 )
+from scryer.server.db import apply_workspace_context
 from scryer.server.models.enums import InvitationStatus, ProjectRole, WorkspaceRole
 from scryer.server.services.errors import (
     AuthError,
@@ -128,7 +129,11 @@ async def redeem_invitation(
     )
 
     # Personal Workspace + default Project; collision retry on slug.
+    # Switch RLS context to the new personal workspace BEFORE inserting the
+    # default Project (projects table is RLS-policied; without a matching
+    # current_workspace_id GUC the INSERT is denied).
     personal_ws = await _create_personal_workspace(session, email, display_name, user.id)
+    await apply_workspace_context(session, personal_ws.id, user_id=user.id)
     await create_project(
         session,
         workspace_id=personal_ws.id,
@@ -150,6 +155,10 @@ async def redeem_invitation(
             )
 
     inv.used_by_user_id = user.id
+    # Restore RLS context to the inviter's workspace so the caller's audit
+    # write (write_event with workspace_id=inv.workspace_id in the signup
+    # handler) satisfies the audit_events policy.
+    await apply_workspace_context(session, inv.workspace_id, user_id=user.id)
     await session.flush()
     return user, inv
 
