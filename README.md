@@ -2,35 +2,43 @@
 
 > Project-agnostic LLM evaluation harness with a control-plane-shaped resource model.
 
-**Status:** Pre-alpha. Phase 0 (repo bootstrap) in progress.
+Multi-user, server-side Run execution, content-hashed versioning, audit log,
+cron-triggered Suites, outbound webhooks, MCP server.
 
-## What it is
+**Live:** <https://scryer-production.up.railway.app/api/v1/healthz>
 
-scryer is an eval framework — peer to [Inspect](https://inspect.aisi.org.uk/) (UK AISI),
-[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness),
-[Braintrust](https://braintrust.dev/), [Phoenix](https://phoenix.arize.com/),
-LangSmith, OpenAI evals.
+## Documentation
 
-It applies the 6 control-plane primitives (Identity+Auth, Resource model,
-Scheduling/Execution, State/Persistence, Observability, Policy/Governance) to
-the eval vertical. Multi-user, server-side execution, content-hashed versioning,
-cron-triggered evals, outbound webhooks, MCP server.
+- **[docs/main.md](docs/main.md)** — entry point + quick start
+- **[docs/architecture.md](docs/architecture.md)** — schema, sandbox, Run lifecycle, audit
+- **[docs/deployment.md](docs/deployment.md)** — Railway + Neon + R2 provisioning
+- **[docs/cli_reference.md](docs/cli_reference.md)** — every `scryer` subcommand
+- **API reference** — `/api/docs` (Swagger UI), `/api/openapi.json` (machine-readable)
 
-## Status
+## Quick start
 
-Design locked; implementation in Phase 0 of 8 phases. See the design plan
-(stored in the originating traitinterp repo) for the full noun set, schema clusters,
-and deferred items.
+```bash
+git clone https://github.com/ewernn/scryer
+cd scryer
+make sync && cp .env.example .env  # fill DATABASE_URL, R2_*, JWT_SECRET, ENCRYPTION_KEY
+make migrate && make serve
+```
+
+Then:
+
+```bash
+scryer auth login --email you@example.com
+scryer dataset push -w <ws> -p <proj> -s golden -n "Golden" -f records.json
+scryer scorer  push -w <ws> -p <proj> -s coh    -n "Coherence" -f scorer.py
+scryer task    push -w <ws> -p <proj> -f task.json
+scryer run     start <task_id>
+scryer run     results <run_id>
+```
 
 ## Stack
 
-- Python 3.12+
-- FastAPI + SQLAlchemy 2.x async + Pydantic 2.x
-- PostgreSQL (Neon) + Cloudflare R2 for blobs
-- Server-rendered Jinja + htmx + Tailwind dashboard
-- MCP server at `/mcp`
-- Hosted on Railway
+Python 3.12 · FastAPI · SQLAlchemy 2.x async · Pydantic 2 · Typer · PostgreSQL 17 (Neon) · Cloudflare R2 · Jinja + htmx + Tailwind dashboard · MCP server · Railway hosting.
 
 ## License
 
-Apache-2.0.
+Apache-2.0
