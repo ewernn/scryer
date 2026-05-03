@@ -95,8 +95,10 @@ scryer/
 │       ├── api/             # JSON endpoints
 │       ├── services/        # pure async business logic
 │       └── models/          # SQLAlchemy 2.x by cluster
-├── migrations/              # Alembic
-└── tests/                   # pytest async; schema-isolated test namespace
+├── migrations/              # Alembic (production migrations live in versions/;
+│                            #   draft/ holds WIP migrations not yet ready to ship)
+└── tests/                   # pytest async; tests run against docker postgres
+                             # with `alembic upgrade head` (see deployment.md)
 ```
 
 ## Doc maintenance

@@ -46,6 +46,41 @@ columns (`<kind>_user_id`, `<kind>_service_account_id`) + a `<kind>` enum +
 a CHECK constraint enforcing exactly one is non-null. Avoids generic-FK
 patterns that break referential integrity.
 
+## Multi-tenancy: workspace_id on every row
+
+Every multi-tenant table carries a `workspace_id` column (NOT NULL FK
+CASCADE → workspaces, with a few `nullable=True` exceptions for system
+rows like `audit_events` and user-keyed `api_keys`). For tables that
+don't naturally hold workspace_id — child rows like `dataset_records`,
+`results`, `trace_steps` — a PG `BEFORE INSERT OR UPDATE` trigger
+auto-populates `NEW.workspace_id` from the parent FK chain
+(`_trgfn_workspace_from_project`, `_trgfn_workspace_from_run`, etc.).
+Service code never sets `workspace_id` on these tables — the trigger
+handles it. The trigger also REJECTS any explicit `workspace_id` that
+mismatches the parent (defense in depth).
+
+Workspace context is injected per-request:
+
+1. `require_workspace_from_path` FastAPI dep (in `services/access.py`)
+   resolves `{workspace_slug}` from URL → asserts membership → sets
+   `request.state.workspace_id` AND `session.info["workspace_id"]`.
+   Applied at router level for every router whose paths uniformly
+   contain `{workspace_slug}` (audit, projects, datasets, scorers,
+   tasks, webhooks, invitations).
+2. `db.py:_set_rls_workspace_context` is a SQLAlchemy `after_begin`
+   listener on `Session`. At every transaction start, it reads
+   `session.info["workspace_id"]` and emits
+   `set_config('app.current_workspace_id', ..., true)`. asyncpg can't
+   parameterize `SET LOCAL` directly, hence `set_config()` function form.
+3. `with_workspace_context(session, workspace_id)` async ctx mgr in
+   `db.py` exists for non-HTTP callers (cron jobs, scripts, tests).
+
+Postgres Row Level Security policies (one per multi-tenant table) gate
+visibility to the row's `workspace_id`. RLS is currently NOT yet enabled
+in production — the migration is parked in `migrations/draft/` pending
+auth-flow extensions for `current_user_id`. See
+`scryer_notepad.md` for the Phase 1c plan.
+
 ## Auth
 
 `Authorization: Bearer <token>` → `get_principal` Depends inspects prefix:
@@ -136,15 +171,44 @@ the full analysis.
 
 Every state-changing service call (`create_*`, `delete_*`, `update_*`,
 `rotate_*`) emits an `AuditEvent` via `services/audit.py:write_event`. Sensitive
-fields (`secret`, `password`, `token`) are auto-redacted via `_REDACT_KEYS`
-before the row is persisted. Multi-tenant queries filter by `workspace_id`.
+fields are auto-redacted via `_REDACT_KEYS` (`password`, `password_hash`,
+`encrypted_value`, `key_hash`, `token_hash`, `secret`) before the row is
+persisted.
+
+## Versioning concurrency
+
+`services/_versioned.py:next_version` takes a transaction-scoped
+`pg_advisory_xact_lock` keyed by `hashtext(project_id|slug|table)` before
+the SELECT MAX → +1 → INSERT sequence. Concurrent pushes for the same
+slug serialize; pushes for different slugs proceed in parallel. The lock
+auto-releases at COMMIT/ROLLBACK. Without it, the UNIQUE constraint
+catches races with an opaque IntegrityError.
+
+## Scorer return contract
+
+`services/scorer_output.py:ScorerOutput` is the typed Pydantic schema
+for what a Scorer's `score()` callable may return. The numeric score
+must appear under one of `score`/`value`/`result` (priority order); any
+extra fields are allowed and preserved on `Result.score_json`. A Scorer
+that returns a dict with no canonical numeric → `Result.error` is set
+to "Scorer return schema mismatch" — visible failure rather than the
+old silent `score_value=NULL` behavior.
 
 ## Test isolation
 
-`conftest.py` creates a unique schema per test session (`scryer_test_<rand>`);
-all DDL runs against it via `search_path`. The `session` fixture wraps each
-test in a SAVEPOINT that's rolled back on teardown, so no test ever commits to
-shared state.
+`conftest.py` spins up a docker postgres container at module load and
+runs `alembic upgrade head` against it before any test runs. Each test
+gets an `AsyncSession` wrapped in an outer transaction with a SAVEPOINT
+that's rolled back on teardown — no commits leak between tests. The
+container is reused for the whole pytest session and torn down via
+`pytest_sessionfinish` (plus `atexit` belt-and-suspenders).
+
+Because tests run against the migrated schema (not
+`Base.metadata.create_all`), triggers, RLS policies, CHECK constraints
+— everything PG-specific — are present in the test DB. New migrations
+land via `make test-migrations` (separate docker postgres on a
+different port) which validates upgrade + downgrade + re-up + smoke
+insert/select.
 
 R2 tests gate on `R2_*` env vars (skipped without creds — won't break CI
 without R2 access). Tests that exercise the rate limiter call
