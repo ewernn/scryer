@@ -30,6 +30,7 @@ from scryer.server.api.me import router as me_router
 from scryer.server.api.projects import router as projects_router
 from scryer.server.api.runs import router as runs_router
 from scryer.server.api.scorers import router as scorers_router
+from scryer.server.api.service_accounts import router as service_accounts_router
 from scryer.server.api.tasks import router as tasks_router
 from scryer.server.api.webhooks import router as webhooks_router
 from scryer.server.api.workspaces import router as workspaces_router
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     api_v1.include_router(runs_router)
     api_v1.include_router(audit_router)
     api_v1.include_router(webhooks_router)
+    api_v1.include_router(service_accounts_router)
     api_v1.include_router(invitations_router)
     api_v1.include_router(signup_router)
     app.include_router(api_v1)
