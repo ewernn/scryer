@@ -35,6 +35,11 @@ class Principal:
     kind: PrincipalKind
     scopes: frozenset[ApiScope]
     api_key_id: uuid.UUID | None = None
+    # For SA-keyed principals: the workspace the SA belongs to. Set at
+    # AuthN time from api_keys.workspace_id (denormalized via trigger
+    # from service_accounts.workspace_id). Lets _assert_sa_workspace
+    # skip a per-request DB lookup. None for User principals.
+    workspace_id: uuid.UUID | None = None
 
 
 async def get_principal(
@@ -65,8 +70,14 @@ async def _principal_from_api_key(token: str, session: AsyncSession) -> Principa
         else row.principal_service_account_id
     )
     assert pid is not None  # CHECK constraint guarantees this
+    # row.workspace_id is set for SA-keyed (Cat 4 trigger from SA) and
+    # NULL for user-keyed.
     return Principal(
-        id=pid, kind=row.principal_kind, scopes=frozenset(row.scopes), api_key_id=row.id
+        id=pid,
+        kind=row.principal_kind,
+        scopes=frozenset(row.scopes),
+        api_key_id=row.id,
+        workspace_id=row.workspace_id,
     )
 
 

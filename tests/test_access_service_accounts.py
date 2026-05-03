@@ -30,12 +30,15 @@ from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
 
 
-def _sa_principal(sa_id) -> Principal:
+def _sa_principal(sa_id, workspace_id) -> Principal:
+    """Build an SA Principal with workspace_id pre-loaded — mirrors how
+    AuthN flow attaches it from api_keys.workspace_id."""
     return Principal(
         id=sa_id,
         kind=PrincipalKind.service_account,
         scopes=frozenset({ApiScope.read, ApiScope.write}),
         api_key_id=uuid4(),
+        workspace_id=workspace_id,
     )
 
 
@@ -50,7 +53,7 @@ async def _user_and_ws(session):
 async def test_sa_member_check_passes_for_own_workspace(session: AsyncSession) -> None:
     user, ws = await _user_and_ws(session)
     sa = await create_service_account(session, workspace_id=ws.id, name="bot")
-    await assert_workspace_member(session, _sa_principal(sa.id), ws.id)  # no raise
+    await assert_workspace_member(session, _sa_principal(sa.id, sa.workspace_id), ws.id)  # no raise
 
 
 async def test_sa_member_check_rejects_foreign_workspace(session: AsyncSession) -> None:
@@ -58,13 +61,13 @@ async def test_sa_member_check_rejects_foreign_workspace(session: AsyncSession) 
     _, ws_b = await _user_and_ws(session)
     sa = await create_service_account(session, workspace_id=ws_a.id, name="bot")
     with pytest.raises(NotFoundError):
-        await assert_workspace_member(session, _sa_principal(sa.id), ws_b.id)
+        await assert_workspace_member(session, _sa_principal(sa.id, sa.workspace_id), ws_b.id)
 
 
 async def test_sa_role_check_member_passes_owner_fails(session: AsyncSession) -> None:
     user, ws = await _user_and_ws(session)
     sa = await create_service_account(session, workspace_id=ws.id, name="bot")
-    p = _sa_principal(sa.id)
+    p = _sa_principal(sa.id, sa.workspace_id)
     # member-level: passes
     await assert_workspace_role(session, p, ws.id, min_role=WorkspaceRole.member)
     # owner-level: rejects (SA effective rank is 'member')
@@ -83,7 +86,9 @@ async def test_sa_project_access_ok_for_workspace_visible(session: AsyncSession)
         owner_user_id=user.id,
         visibility=ProjectVisibility.workspace,
     )
-    proj_returned = await assert_project_access(session, _sa_principal(sa.id), proj.id)
+    proj_returned = await assert_project_access(
+        session, _sa_principal(sa.id, sa.workspace_id), proj.id
+    )
     assert proj_returned.id == proj.id
 
 
@@ -99,7 +104,7 @@ async def test_sa_project_access_blocked_for_private(session: AsyncSession) -> N
         visibility=ProjectVisibility.private,
     )
     with pytest.raises(NotFoundError):
-        await assert_project_access(session, _sa_principal(sa.id), proj.id)
+        await assert_project_access(session, _sa_principal(sa.id, sa.workspace_id), proj.id)
 
 
 async def test_sa_deactivated_raises(session: AsyncSession) -> None:
@@ -108,7 +113,7 @@ async def test_sa_deactivated_raises(session: AsyncSession) -> None:
     sa.is_active = False
     await session.flush()
     with pytest.raises(PermissionError):
-        await assert_workspace_member(session, _sa_principal(sa.id), ws.id)
+        await assert_workspace_member(session, _sa_principal(sa.id, sa.workspace_id), ws.id)
 
 
 async def test_sa_archived_workspace_raises(session: AsyncSession) -> None:
@@ -121,4 +126,4 @@ async def test_sa_archived_workspace_raises(session: AsyncSession) -> None:
     ws.archived_at = datetime.now(UTC)
     await session.flush()
     with pytest.raises(NotFoundError):
-        await assert_workspace_member(session, _sa_principal(sa.id), ws.id)
+        await assert_workspace_member(session, _sa_principal(sa.id, sa.workspace_id), ws.id)
