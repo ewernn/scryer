@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,10 @@ from scryer.server.services.datasets import (
     list_datasets,
     list_records,
     push_dataset,
+)
+from scryer.server.services.idempotency import (
+    capture_idempotency_response,
+    check_idempotency,
 )
 
 router = APIRouter(tags=["datasets"])
@@ -76,13 +80,16 @@ def _to_out(ds: Any) -> DatasetOut:
     response_model=DatasetOut,
     operation_id="datasets.push",
     summary="Push a new Dataset version",
+    dependencies=[Depends(check_idempotency)],
 )
 async def push(
+    request: Request,
     workspace_slug: str,
     project_slug: str,
     body: DatasetPushRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> DatasetOut:
     proj = await get_project_by_slug_path(
         session, principal, workspace_slug=workspace_slug, project_slug=project_slug
@@ -97,7 +104,15 @@ async def push(
         schema_json=body.record_schema,
     )
     await session.commit()
-    return _to_out(ds)
+    out = _to_out(ds)
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=200,
+        body=out.model_dump(mode="json"),
+    )
+    return out
 
 
 @router.get(

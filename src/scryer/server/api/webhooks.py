@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,10 @@ from scryer.server.db import get_session
 from scryer.server.models.enums import WorkspaceRole
 from scryer.server.services.access import assert_workspace_role, require_workspace_from_path
 from scryer.server.services.audit import write_event
+from scryer.server.services.idempotency import (
+    capture_idempotency_response,
+    check_idempotency,
+)
 from scryer.server.services.webhooks import (
     create_webhook,
     delete_webhook,
@@ -68,12 +72,15 @@ class WebhookCreate(BaseModel):
     status_code=status.HTTP_201_CREATED,
     operation_id="webhooks.create",
     summary="Register a webhook (returns secret once)",
+    dependencies=[Depends(check_idempotency)],
 )
 async def create_(
+    request: Request,
     workspace_slug: str,
     body: WebhookCreate,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> WebhookCreatedOut:
     ws = await get_workspace_by_slug(session, workspace_slug)
     await assert_workspace_role(session, principal, ws.id, min_role=WorkspaceRole.owner)
@@ -94,7 +101,15 @@ async def create_(
         after_json={"name": wh.name, "url": wh.url, "secret": wh.secret},
     )
     await session.commit()
-    return WebhookCreatedOut.model_validate(wh)
+    out = WebhookCreatedOut.model_validate(wh)
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=201,
+        body=out.model_dump(mode="json"),
+    )
+    return out
 
 
 @router.get(

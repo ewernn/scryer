@@ -5,13 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.services.access import get_project_by_slug_path, require_workspace_from_path
+from scryer.server.services.idempotency import (
+    capture_idempotency_response,
+    check_idempotency,
+)
 from scryer.server.services.scorers import (
     get_scorer_latest,
     list_scorers,
@@ -57,13 +61,16 @@ def _to_out(s: Any) -> ScorerOut:
     "/workspaces/{workspace_slug}/projects/{project_slug}/scorers",
     response_model=ScorerOut,
     operation_id="scorers.push",
+    dependencies=[Depends(check_idempotency)],
 )
 async def push(
+    request: Request,
     workspace_slug: str,
     project_slug: str,
     body: ScorerPushRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> ScorerOut:
     proj = await get_project_by_slug_path(
         session, principal, workspace_slug=workspace_slug, project_slug=project_slug
@@ -78,7 +85,15 @@ async def push(
         server_executable=body.server_executable,
     )
     await session.commit()
-    return _to_out(s)
+    out = _to_out(s)
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=200,
+        body=out.model_dump(mode="json"),
+    )
+    return out
 
 
 @router.get(

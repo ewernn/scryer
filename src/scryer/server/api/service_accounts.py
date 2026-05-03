@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,10 @@ from scryer.server.services.access import (
 )
 from scryer.server.services.api_keys import issue_api_key
 from scryer.server.services.audit import write_event
+from scryer.server.services.idempotency import (
+    capture_idempotency_response,
+    check_idempotency,
+)
 from scryer.server.services.service_accounts import (
     archive_service_account,
     create_service_account,
@@ -84,12 +88,15 @@ def _to_out(sa: ServiceAccount) -> ServiceAccountOut:
     response_model=ServiceAccountOut,
     operation_id="service_accounts.create",
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(check_idempotency)],
 )
 async def create(
+    request: Request,
     workspace_slug: str,
     body: ServiceAccountCreateRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> ServiceAccountOut:
     ws = await get_workspace_by_slug(session, workspace_slug)
     await assert_workspace_role(session, principal, ws.id, min_role=WorkspaceRole.owner)
@@ -111,7 +118,15 @@ async def create(
         after_json={"name": body.name, "requires_approval": body.requires_approval},
     )
     await session.commit()
-    return _to_out(sa)
+    out = _to_out(sa)
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=201,
+        body=out.model_dump(mode="json"),
+    )
+    return out
 
 
 @router.get(
@@ -168,13 +183,16 @@ async def archive(
     operation_id="service_accounts.issue_api_key",
     status_code=status.HTTP_201_CREATED,
     summary="Issue a new API key for this ServiceAccount; full_key returned ONCE",
+    dependencies=[Depends(check_idempotency)],
 )
 async def issue_key(
+    request: Request,
     workspace_slug: str,
     sa_id: str,
     body: ApiKeyIssueRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> ApiKeyCreatedOut:
     ws = await get_workspace_by_slug(session, workspace_slug)
     await assert_workspace_role(session, principal, ws.id, min_role=WorkspaceRole.owner)
@@ -202,10 +220,18 @@ async def issue_key(
         after_json={"name": body.name, "scopes": body.scopes, "service_account_id": sa_id},
     )
     await session.commit()
-    return ApiKeyCreatedOut(
+    out = ApiKeyCreatedOut(
         id=str(row.id),
         name=row.name,
         scopes=[s.value for s in row.scopes],
         full_key=full_key,
         created_at=row.created_at,
     )
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=201,
+        body=out.model_dump(mode="json"),
+    )
+    return out
