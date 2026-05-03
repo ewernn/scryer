@@ -9,6 +9,7 @@ from scryer.cli import dataset as dataset_cli
 from scryer.cli import invite as invite_cli
 from scryer.cli import project as project_cli
 from scryer.cli import run as run_cli
+from scryer.cli import sa as sa_cli
 from scryer.cli import scorer as scorer_cli
 from scryer.cli import task as task_cli
 from scryer.cli import workspace as workspace_cli
@@ -27,6 +28,7 @@ app.add_typer(dataset_cli.app, name="dataset")
 app.add_typer(scorer_cli.app, name="scorer")
 app.add_typer(task_cli.app, name="task")
 app.add_typer(run_cli.app, name="run")
+app.add_typer(sa_cli.app, name="sa")
 
 
 def main() -> None:
