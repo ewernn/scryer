@@ -24,7 +24,6 @@ from scryer.server.services.errors import AuthError
 from scryer.server.services.service_accounts import create_service_account
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
-
 from tests.conftest import workspace_context
 
 

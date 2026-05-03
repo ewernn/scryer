@@ -5,12 +5,15 @@ Engine is built once per app via the lifespan handler and attached to
 `Depends(get_session)`. No module-global cache — tests can swap DATABASE_URL
 by building a fresh engine per fixture.
 
-RLS context: every transaction injects `SET LOCAL app.current_workspace_id`
-from `session.info["workspace_id"]` via an `after_begin` SQLAlchemy event
-listener. The dependency `get_session` populates that key from
-`request.state.workspace_id` if set (by `require_workspace_context` Depends
-or middleware). Without a workspace_id, RLS-policied tables return zero
-rows — fail-closed.
+RLS context: every transaction injects two GUCs via an `after_begin`
+listener — `app.current_workspace_id` (from `session.info["workspace_id"]`)
+and `app.current_user_id` (from `session.info["current_user_id"]`).
+
+`require_workspace_from_path` (services/access.py) sets the workspace key
+when a `{workspace_slug}` path resolves; `set_user_context_dep` (same
+file) sets the user key on routes outside any workspace (auth, /me).
+
+Without the relevant GUC, RLS-policied tables return zero rows. Fail-closed.
 """
 
 from __future__ import annotations
@@ -49,22 +52,28 @@ def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessio
 
 
 @event.listens_for(Session, "after_begin")
-def _set_rls_workspace_context(session, transaction, connection) -> None:  # type: ignore[no-untyped-def]
-    """SET LOCAL app.current_workspace_id at every transaction start.
+def _set_rls_context(session, transaction, connection) -> None:  # type: ignore[no-untyped-def]
+    """SET LOCAL app.current_{workspace,user}_id at every transaction start.
 
-    Module-level listener on Session — fires for every session in the process.
-    The body is conditional on `session.info["workspace_id"]` so sessions
-    that don't need RLS context (auth, healthz) are unaffected.
+    Module-level listener on Session — fires for every session in the
+    process. Each branch is conditional on the corresponding session.info
+    key so sessions that don't need RLS context (the AuthN flow itself,
+    healthz) are unaffected.
 
-    Without a workspace_id, RLS-policied tables return zero rows — fail-closed."""
+    Uses set_config() function form because `SET LOCAL var = value` is a
+    server command that can't take parameter placeholders. set_config(name,
+    value, is_local=true) is the parameter-friendly equivalent."""
     ws_id = session.info.get("workspace_id")
     if ws_id is not None:
-        # Use set_config() function form — `SET LOCAL var = value` is a server
-        # command and doesn't accept parameter placeholders. set_config(name,
-        # value, is_local=true) is the parameter-friendly equivalent.
         connection.execute(
             text("SELECT set_config('app.current_workspace_id', :wid, true)"),
             {"wid": str(ws_id)},
+        )
+    user_id = session.info.get("current_user_id")
+    if user_id is not None:
+        connection.execute(
+            text("SELECT set_config('app.current_user_id', :uid, true)"),
+            {"uid": str(user_id)},
         )
 
 
@@ -74,22 +83,33 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         ws_id = getattr(request.state, "workspace_id", None)
         if ws_id is not None:
             session.info["workspace_id"] = ws_id
+        user_id = getattr(request.state, "current_user_id", None)
+        if user_id is not None:
+            session.info["current_user_id"] = user_id
         yield session
 
 
 @asynccontextmanager
 async def with_workspace_context(
-    session: AsyncSession, workspace_id: str | object
+    session: AsyncSession,
+    workspace_id: str | object,
+    *,
+    user_id: str | object | None = None,
 ) -> AsyncIterator[None]:
-    """Set RLS workspace context for callers that don't go through HTTP
-    (cron workers, tests, internal scripts). The SET LOCAL applies for the
-    transaction the next statement opens.
+    """Set RLS context for callers that don't go through HTTP (cron workers,
+    tests, internal scripts). Apply BEFORE the next statement opens a
+    transaction; the listener consumes session.info on `after_begin`.
 
     Usage:
         async with with_workspace_context(session, ws.id):
             await session.execute(select(Run).where(...))
-    """
+
+    Pass `user_id=` if your queries also need to satisfy auth-table RLS
+    policies that gate on `app.current_user_id` (workspace_members,
+    project_members)."""
     session.info["workspace_id"] = workspace_id
+    if user_id is not None:
+        session.info["current_user_id"] = user_id
     try:
         yield
     finally:

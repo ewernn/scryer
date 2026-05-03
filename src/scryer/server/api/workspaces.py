@@ -11,13 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
-from scryer.server.services.access import assert_workspace_member
+from scryer.server.services.access import assert_workspace_member, set_user_context_dep
 from scryer.server.services.workspaces import (
     get_workspace_by_slug,
     list_workspaces_for_user,
 )
 
-router = APIRouter(prefix="/workspaces", tags=["workspaces"])
+router = APIRouter(
+    prefix="/workspaces",
+    tags=["workspaces"],
+    dependencies=[Depends(set_user_context_dep)],
+)
 
 
 class WorkspaceOut(BaseModel):

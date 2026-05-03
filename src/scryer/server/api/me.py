@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from scryer.server.auth import Principal, get_principal
 from scryer.server.db import get_session
 from scryer.server.models.eval import Dataset, Scorer
+from scryer.server.services.access import set_user_context_dep
 from scryer.server.services.projects import list_projects_for_user_in_workspace
 from scryer.server.services.workspaces import list_workspaces_for_user
 
-router = APIRouter(tags=["meta"])
+router = APIRouter(tags=["meta"], dependencies=[Depends(set_user_context_dep)])
 
 
 class IdentityOut(BaseModel):

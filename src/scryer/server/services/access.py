@@ -137,9 +137,12 @@ async def require_workspace_from_path(
         )
     or per-route on routers that mix workspace-scoped + global routes.
 
-    Sets BOTH:
-      - request.state.workspace_id  → consumed by future Depends/middleware
-      - session.info["workspace_id"] → consumed by RLS listener at next tx
+    Sets BOTH GUCs the RLS listener cares about:
+      - app.current_workspace_id from `request.state.workspace_id`
+      - app.current_user_id from `request.state.current_user_id`
+        (only when principal.kind == user; SA-keyed flows go through
+        the workspace_id check on api_keys policy and don't need the
+        user GUC).
     """
     from scryer.server.services.workspaces import get_workspace_by_slug
 
@@ -147,7 +150,29 @@ async def require_workspace_from_path(
     await assert_workspace_member(session, principal, ws.id)
     request.state.workspace_id = ws.id
     session.info["workspace_id"] = ws.id
+    if principal.kind == PrincipalKind.user:
+        request.state.current_user_id = principal.id
+        session.info["current_user_id"] = principal.id
     return ws.id
+
+
+async def set_user_context_dep(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(get_principal)],
+) -> Principal:
+    """FastAPI dep for routes WITHOUT workspace context but WITH a user
+    principal (auth, /me). Sets only `app.current_user_id` so policies on
+    workspace_members / project_members can permit the user's own rows.
+
+    Apply at router level the same way as `require_workspace_from_path`.
+    For SA principals it's a no-op — they don't have a user identity to
+    project, and routes that need SA access should resolve through a
+    workspace path instead."""
+    if principal.kind == PrincipalKind.user:
+        request.state.current_user_id = principal.id
+        session.info["current_user_id"] = principal.id
+    return principal
 
 
 async def get_project_by_slug_path(

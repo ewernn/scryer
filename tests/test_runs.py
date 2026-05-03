@@ -22,7 +22,6 @@ from scryer.server.services.scorers import push_scorer
 from scryer.server.services.tasks import push_task
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
-
 from tests.conftest import workspace_context
 
 
