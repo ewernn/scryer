@@ -186,6 +186,10 @@ def capture_idempotency_response(
 
     async def _write() -> None:
         async with session_factory() as s:
+            # `is not None` not `if body_to_cache else None`: empty dicts /
+            # lists are valid response bodies that should still cache (so
+            # a replay returns `{}` not `null`). Only an explicit None
+            # collapses to NULL — that's the cache_body=False path.
             await s.execute(
                 text(
                     "UPDATE idempotency_keys "
@@ -194,7 +198,7 @@ def capture_idempotency_response(
                 ),
                 {
                     "sc": status_code,
-                    "body": json.dumps(body_to_cache) if body_to_cache else None,
+                    "body": json.dumps(body_to_cache) if body_to_cache is not None else None,
                     "id": row_id,
                 },
             )
