@@ -70,6 +70,22 @@ async def test_rename_workspace_slug_creates_redirect(session: AsyncSession) -> 
         assert via_new.slug == new
 
 
+async def test_slug_cycle_rejects_revival_of_retired(session: AsyncSession) -> None:
+    """A → B → A should fail: A becomes a retired alias when B takes over,
+    and the slug-history trigger's PK on workspace_slugs.slug rejects
+    re-inserting A (whether by a new workspace or by renaming back).
+    Most-likely real-world footgun: operator fixes a slug typo by reverting,
+    expects it to work, hits a hard error. Verifies the trigger's
+    invariant holds end-to-end."""
+    user = await _user(session)
+    a = f"ws-{uuid4().hex[:8]}"
+    b = f"ws-{uuid4().hex[:8]}"
+    ws = await create_workspace(session, slug=a, name="W", owner_user_id=user.id)
+    await rename_workspace_slug(session, ws.id, b)
+    with pytest.raises(ConflictError):
+        await rename_workspace_slug(session, ws.id, a)
+
+
 async def test_get_workspace_by_slug_resolves_both(session: AsyncSession) -> None:
     user = await _user(session)
     slug = f"ws-{uuid4().hex[:8]}"

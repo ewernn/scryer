@@ -126,3 +126,31 @@ async def test_with_workspace_context_takes_user_id(engine: AsyncEngine) -> None
             ).scalar_one()
             assert ws_got == str(ws_id)
             assert user_got == str(user_id)
+
+
+async def test_apply_workspace_context_successive_calls_in_same_tx(
+    engine: AsyncEngine,
+) -> None:
+    """Mid-transaction GUC switching: write_event + the cron iteration
+    both call apply_workspace_context multiple times in one transaction
+    to switch tenant context. Verifies each call updates the GUC for
+    subsequent statements in the SAME transaction (not just the next)."""
+    from scryer.server.db import apply_workspace_context
+
+    factory = build_session_factory(engine)
+    ws_a = uuid4()
+    ws_b = uuid4()
+    async with factory() as s:
+        # Open a transaction by issuing any statement first
+        await s.execute(text("SELECT 1"))
+        # Switch context twice within the open transaction.
+        await apply_workspace_context(s, ws_a)
+        got_a = (
+            await s.execute(text("SELECT current_setting('app.current_workspace_id', true)"))
+        ).scalar_one()
+        assert got_a == str(ws_a)
+        await apply_workspace_context(s, ws_b)
+        got_b = (
+            await s.execute(text("SELECT current_setting('app.current_workspace_id', true)"))
+        ).scalar_one()
+        assert got_b == str(ws_b), "second apply_workspace_context didn't override the first"
