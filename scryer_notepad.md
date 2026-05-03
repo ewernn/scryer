@@ -10,8 +10,8 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
   (`db_ok: true` after every push)
 - **Migration head in prod**: `d8a719c5b2e7` (slug history triggers,
   shipped 2026-05-03)
-- **Tests**: 169 passing in ~20s, includes 4 RLS enforcement tests via
-  `rls_session` (scryer_app role, RLS-gated)
+- **Tests**: 178 passing in ~21s, includes 4 RLS enforcement tests +
+  6 SA access-helper unit tests + 3 SA HTTP integration tests
 - **Active wave**: pick next from the queue below
 
 ## Read order at every loop iteration
@@ -33,13 +33,12 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 ☑ R2             — slug history triggers, migration d8a719c5b2e7 in prod
 ☑ Q part         — drop Sunset header + /healthz/deep done; D2 cursor
                    pagination still pending
+☑ R4             — SA access helpers + HTTP API + 9 tests. CLI deferred.
 □ P1 Phase 4     — cascade-down soft-delete + idempotency_keys table
 □ R1             — audit auto-emission via SQLAlchemy listeners
                    (LOW PRIORITY — only 5 callsites today, hand-written
                    audit gives better action labels than auto-listener)
-□ R4             — finish ServiceAccount as first-class principal
-                   (extend assert_workspace_member, CLI command,
-                   end-to-end test)
+□ R4 part 3      — `scryer sa` CLI (create/list/key) — small follow-up
 □ P3             — outbox table only (Procrastinate deferred)
 □ Q D2           — cursor pagination on every list endpoint (~6-8h)
 ```
