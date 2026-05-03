@@ -8,11 +8,63 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `f3c5d8e0a712` (time-as-DB-truth) —
-  prior heads d8a719c5b2e7 (slug triggers) and e9f1a4c8b3d6 (audit
-  events strict isolation) all shipped 2026-05-03 same wave.
-- **Tests**: 181 passing in ~22s
-- **Active wave**: pick next from the queue below
+- **Migration head in prod**: `a1b2c3d4e5f6` (idempotency_keys table).
+  Recent migrations on `main`: f3c5d8e0a712 (time-as-DB-truth),
+  e9f1a4c8b3d6 (audit_events strict isolation), d8a719c5b2e7 (slug
+  history triggers), c4f2e1b9a3d5 (Phase 1c FORCE RLS).
+- **Tests**: 185 passing in ~22s
+- **Active wave**: Wave 2+5 BUNDLED (cascade-down soft-delete +
+  archived_at-as-RLS-predicate) — see "Wave 2+5 NEXT" below
+
+## Wave 1 SHIPPED (2026-05-03 evening)
+
+Idempotency-Key middleware as a Depends. Stripe semantics: silent on
+missing header, replay returns cached, 422 on body mismatch, 409 on
+in-flight, 4xx cached / 5xx not cached, 24h TTL. Two-tier table
+(workspace + non-workspace) with two RLS policies (workspace +
+principal isolation). Wired on POST /workspaces/{slug}/runs as first
+consumer; replay returns 'Idempotent-Replay: true' header. 3 tests in
+test_idempotency.py. To wire on more endpoints later: add
+`dependencies=[Depends(check_idempotency)]` + `request: Request,
+background_tasks: BackgroundTasks` params + before-return call to
+`capture_idempotency_response(...)`.
+
+## Wave 2+5 NEXT — cascade-down + archived_at RLS (BUNDLED)
+
+CRITIC BLOCKER from scope-out: must bundle. Adding `archived_at IS
+NULL` to USING without explicit `WITH CHECK (workspace_id only)`
+breaks every soft-delete UPDATE.
+
+Implementation per agent specs (in `notepad/wave_2_5_plan.md` if
+written; otherwise from scope-out report in conversation history):
+
+1. New migration:
+   a. ADD COLUMN webhooks.archived_at if missing
+   b. CREATE FUNCTION _trgfn_cascade_archive_workspace() — fans
+      out archived_at from workspace to projects + service_accounts
+      + credentials + budgets + webhooks via bulk UPDATE WHERE
+      workspace_id=NEW.id AND archived_at IS NULL
+   c. CREATE TRIGGER on workspaces AFTER UPDATE OF archived_at
+      WHEN (NEW.archived_at IS NOT NULL AND OLD.archived_at IS NULL)
+   d. DROP+CREATE policy on 8 SoftDelete RLS tables (datasets,
+      scorers, agents, tools, prompts, tasks, projects, credentials):
+      USING (ws=guc AND (archived_at IS NULL OR
+             current_setting('app.include_archived', true) = 'true'))
+      WITH CHECK (ws=guc)
+2. archive_workspace service in services/workspaces.py — sets
+   archived_at + bulk UPDATE Run.status='cancelled' for queued/running
+3. DELETE /workspaces/{slug} endpoint — owner-only, idempotent (re-
+   archive returns 204 because trigger WHERE filters)
+4. apply_workspace_context gains optional include_archived kwarg;
+   _set_rls_context emits set_config('app.include_archived', ..., true)
+5. Tests: cascade reach + RLS hide + USING/WITH CHECK split verification
+
+## Wave 3 NEXT-NEXT — PID-tracking cancellation
+
+Add Run.executor_pid column + module-level _active_procs dict in
+services/runs.py + sandbox.run_user_code on_proc_start callback +
+cancel_run does proc.terminate() + 5s grace + proc.kill().
+Cooperative status check between records. ~2-3h.
 
 ## Most recent iteration's wave (post-Phase-1c hardening)
 
