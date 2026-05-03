@@ -85,6 +85,35 @@ async def test_rls_blocks_count_query_without_guc(rls_session: AsyncSession) -> 
     assert n == 0, f"expected 0 rows visible without GUC, got {n}"
 
 
+async def test_audit_events_no_null_workspace_leak(rls_session: AsyncSession) -> None:
+    """Migration e9f1a4c8b3d6 dropped the `workspace_id IS NULL OR matches`
+    pass-through. Verify a NULL-workspace audit row (would-be system event)
+    is invisible to ANY tenant and that an attempted INSERT with workspace_id
+    mismatch fails the WITH CHECK policy.
+
+    This is the regression-protection for the cross-tenant info-disclosure
+    fix — without it, a future migration that re-adds `IS NULL OR` would
+    silently re-introduce the leak."""
+    from sqlalchemy.exc import ProgrammingError
+
+    (ws_a, _, _), _ = await _seed_two_workspaces(rls_session)
+    await apply_workspace_context(rls_session, ws_a.id)
+    # Try to INSERT an audit row with workspace_id=NULL — must fail
+    # WITH CHECK because the policy requires workspace_id = current GUC.
+    blocked = False
+    try:
+        await rls_session.execute(
+            text(
+                "INSERT INTO audit_events (action, actor_kind, workspace_id, timestamp) "
+                "VALUES ('test.system_event', 'system', NULL, now())"
+            )
+        )
+        await rls_session.flush()
+    except ProgrammingError as exc:
+        blocked = "row-level security policy" in str(exc).lower()
+    assert blocked, "RLS must block NULL-workspace audit INSERT under tightened policy"
+
+
 async def test_rls_blocks_cross_tenant_insert(rls_session: AsyncSession) -> None:
     """INSERT into a table for a different workspace fails the WITH CHECK
     policy. The trigger _trgfn_workspace_from_project also raises on
