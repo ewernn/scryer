@@ -8,11 +8,25 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `d8a719c5b2e7` (slug history triggers,
-  shipped 2026-05-03)
-- **Tests**: 178 passing in ~21s, includes 4 RLS enforcement tests +
-  6 SA access-helper unit tests + 3 SA HTTP integration tests
+- **Migration head in prod**: `f3c5d8e0a712` (time-as-DB-truth) —
+  prior heads d8a719c5b2e7 (slug triggers) and e9f1a4c8b3d6 (audit
+  events strict isolation) all shipped 2026-05-03 same wave.
+- **Tests**: 181 passing in ~22s
 - **Active wave**: pick next from the queue below
+
+## Most recent iteration's wave (post-Phase-1c hardening)
+
+Critic audit after Phase 1c shipped surfaced 4 critical RLS gaps
+that tests didn't catch (engine fixture is SUPERUSER, bypasses RLS).
+All four fixed:
+- /web/runs/{id} → /web/workspaces/{slug}/runs/{id} (URL nest, GUC set)
+- audit_events policy tightened to drop NULL-workspace cross-tenant leak
+- MAX_TRIGGERS_PER_WORKSPACE filter switched from project_id to workspace_id
+- _assert_sa_workspace now also checks workspace.archived_at
+
+Plus reflector recommendations:
+- Principal carries workspace_id for SA — eliminates per-request DB lookup
+- TimestampMixin uses server_default now() — kills clock skew across processes
 
 ## Read order at every loop iteration
 
