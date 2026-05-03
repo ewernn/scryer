@@ -75,11 +75,67 @@ Workspace context is injected per-request:
 3. `with_workspace_context(session, workspace_id)` async ctx mgr in
    `db.py` exists for non-HTTP callers (cron jobs, scripts, tests).
 
-Postgres Row Level Security policies (one per multi-tenant table) gate
-visibility to the row's `workspace_id`. RLS is currently NOT yet enabled
-in production — the migration is parked in `migrations/draft/` pending
-auth-flow extensions for `current_user_id`. See
-`scryer_notepad.md` for the Phase 1c plan.
+Postgres Row Level Security policies gate visibility per
+`workspace_id`. RLS is **enabled and FORCEd** on every multi-tenant
+table in production (migration `c4f2e1b9a3d5`). The FORCE matters: the
+table owner role bypasses RLS by default; without FORCE, RLS is a
+no-op for the application's connecting role.
+
+Policies use `NULLIF(current_setting('app.current_workspace_id',
+true), '')::uuid` to fail-closed: missing GUC → NULL → equality fails
+→ row denied. The `audit_events` policy is stricter (migration
+`e9f1a4c8b3d6`) — it requires explicit workspace_id match (no NULL
+pass-through), preventing cross-tenant info disclosure on system
+events.
+
+Tests run as `scryer_app` (NOT SUPERUSER, NOT BYPASSRLS) so policies
+actually apply; cross-tenant test setup uses a `scryer_setup`
+(BYPASSRLS) role via `privileged_engine`.
+
+### archived_at as RLS predicate (Wave 5, migration 9db64f8a534b)
+
+For tables that mix `SoftDeleteMixin`, the policy USING also gates
+on `archived_at`:
+
+```sql
+USING (workspace_id = guc
+       AND (archived_at IS NULL OR
+            current_setting('app.include_archived', true) = 'true'))
+WITH CHECK (workspace_id = guc)
+```
+
+Two PG behaviours forced this design:
+
+1. **USING/WITH CHECK split**: PG defaults WITH CHECK to USING when
+   omitted. Without the explicit split, every soft-delete UPDATE would
+   fail WITH CHECK on the post-row.
+2. **Post-row USING**: PG also evaluates SELECT/USING against the
+   *new* row of every UPDATE (visibility-after-write check). Setting
+   `archived_at = now()` produces a row that fails the USING predicate
+   unless `app.include_archived='true'` is set.
+
+The cascade trigger (below) handles #2 by setting `include_archived='true'`
+inside its function body and restoring the prior value on RETURN.
+Application code that needs to write or view archived rows passes
+`include_archived=True` to `apply_workspace_context`.
+
+### Cascade-down soft-delete (Wave 2, migrations 9db64f8a534b + 8f52f0aae3fe)
+
+Archiving a workspace fans out via DB trigger to 11 children with
+`workspace_id` NOT NULL: projects, service_accounts, credentials,
+budgets, webhooks, datasets, scorers, agents, tools, prompts, tasks.
+The trigger fires `AFTER UPDATE OF archived_at WHEN (NEW.archived_at
+IS NOT NULL AND OLD.archived_at IS NULL)` — first-archive only,
+re-archives are no-ops, un-archives don't cascade-up (Stripe model:
+restoration is one-way). Children that are already independently
+archived keep their original timestamp via `WHERE archived_at IS NULL`
+guard inside the cascade.
+
+`services/workspaces.py:archive_workspace` drives the flow: stamps
+the workspace's `archived_at`, lets the trigger cascade, then
+bulk-cancels in-flight Runs (`status='cancelled'`). For Runs whose
+executor is local (PID matches), it also tears down the subprocess
+via the same SIGTERM/grace/SIGKILL sequence as `cancel_run`.
 
 ## Auth
 
@@ -113,21 +169,67 @@ with a `retryable` extension. Validation errors include per-field details.
 
 `services/runs.py:execute_run`:
 
-1. Atomic `UPDATE ... WHERE status='queued'` claims the Run (concurrency-safe).
+1. Atomic `UPDATE ... WHERE status='queued'` claims the Run AND stamps
+   `executor_pid = os.getpid()` (concurrency-safe; PID enables Wave 3
+   cancellation).
 2. Loads Task → Scorer → DatasetRecords.
-3. For each record, runs the Scorer in a **subprocess sandbox**:
+3. Per-record cooperative cancellation check: `await
+   session.refresh(run, ["status"])`; if `cancelled`, break early.
+4. For each record, runs the Scorer in a **subprocess sandbox** via
+   `sandbox.run_user_code`. The sandbox accepts an `on_proc_start`
+   callback; the executor uses it to register the live `Process`
+   handle in module-global `_active_procs[run.id] = proc`.
    - stripped env (only PATH, HOME, TMPDIR, PYTHONUNBUFFERED, PYTHONHASHSEED=0)
    - rlimits (CPU, memory, file count, output size)
    - JSON envelope written via side-channel file argv path (avoids stdout pollution)
    - timeout enforced; SIGKILL on overrun
-4. Heartbeat by wall-clock every 30 s; reaper marks `failed` after 60 s of silence.
-5. On terminal status, fires `run.{status}` event → `services/webhooks.py:fire_event`
+5. Heartbeat by wall-clock every 30 s; reaper marks `failed` after 60 s of silence.
+6. Crash-resilient: any non-`SandboxError` exception in the for-loop is
+   caught, the Run is stamped `status='failed'` with `executor_crashed: ...`
+   reason, and the original exception re-raised. Prevents Runs stuck
+   at `status='running'` for the heartbeat reaper to mislabel.
+7. On terminal status, fires `run.{status}` event → `services/webhooks.py:fire_event`
    queues one `WebhookDelivery` per subscribed Webhook.
-6. Auto-writes a system `Comment` with summary stats (plan §8 layer 3).
+8. Auto-writes a system `Comment` with summary stats (plan §8 layer 3).
+
+`cancel_run` flips `status='cancelled'`. If `executor_pid == os.getpid()`
+AND `_active_procs[run_id]` is set, also tears down the subprocess:
+`SIGTERM → CANCEL_GRACE_SECONDS (5s) → SIGKILL`. `ProcessLookupError`
+on terminate/kill is treated as a benign already-exited race.
+Cross-process cancellation lands at the next per-record cooperative
+check — at most one record's worth of latency.
 
 Supersession: `queue_run(supersede=True)` atomically marks prior queued/running
 Runs of the same Task as `superseded` (FK `superseded_by_run_id` → new Run id;
 CHECK `(status='superseded') = (superseded_by_run_id IS NOT NULL)`).
+
+## Idempotency-Key middleware
+
+POST endpoints that mutate state accept the standard `Idempotency-Key`
+header and follow Stripe semantics. Implementation:
+`services/idempotency.py:check_idempotency` is a FastAPI Depends that
+runs after `get_principal` + `require_workspace_from_path`, so RLS +
+principal context are established when the lookup happens.
+
+- Header absent → silent no-op (route runs as if no idempotency).
+- Same key + same body, prior 2xx/4xx response cached → returns cached
+  body via `CachedResponseError` handler with `Idempotent-Replay: true`
+  response header.
+- Same key + same body, slot still in-flight (status_code IS NULL) → 409.
+- Same key + DIFFERENT body → 422 (key reuse with mismatched request).
+- 5xx responses NOT cached — let retries proceed.
+- 24h TTL (`IDEMPOTENCY_TTL_SECONDS` env var).
+
+Two-tier table: a partial unique index per (`workspace_id`, `principal_id`,
+`key`) for workspace-scoped routes and per (`principal_id`, `key`) for
+non-workspace routes (both gated by RLS policies).
+
+Wired today on: `POST /workspaces/{slug}/runs`, `POST datasets`, `POST
+scorers`, `POST tasks`, `POST webhooks`, `POST service-accounts`, `POST
+service-accounts/{id}/api-keys`. Endpoints whose response includes a
+one-shot secret (webhook secret, SA `full_key`) pass `cache_body=False`
+to `capture_idempotency_response` — replays return the cached
+status_code with NULL body, so retries cannot recover the secret.
 
 ## Webhook delivery
 
