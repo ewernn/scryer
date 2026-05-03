@@ -9,11 +9,13 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
 - **Migration head in prod**: `c4f2e1b9a3d5` (ENABLE + FORCE RLS on data
-  tables) — shipped 2026-05-03; verified via curl healthz
-- **Tests**: 167 passing in ~21s, including 4 enforcement tests via the
-  `rls_session` fixture (scryer_app role, RLS-gated)
-- **Active wave**: Phase 1c follow-ups — audit non-route service callers,
-  fix `/me` silent-empty, extend RLS to auth tables (P1c-2)
+  tables) — shipped 2026-05-03 and Phase 1c-2 follow-ups landed:
+  apply_workspace_context primitive + cron iterates per-workspace +
+  /runs nested under /workspaces/{slug} + write_event self-applies
+  audit context.
+- **Tests**: 167 passing in ~21s, includes 4 RLS enforcement tests via
+  `rls_session` (scryer_app role, RLS-gated)
+- **Active wave**: pick next from the queue below
 
 ## Read order at every loop iteration
 

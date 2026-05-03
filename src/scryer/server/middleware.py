@@ -1,8 +1,8 @@
 """ASGI middlewares.
 
-- ApiVersionHeadersMiddleware: stamps Scryer-Version + Sunset on every response
-  (plan §12 / RFC 8594). Pure ASGI to avoid Starlette BaseHTTPMiddleware's
-  body-buffering quirks with streaming responses.
+- ApiVersionHeadersMiddleware: stamps Scryer-Version on every response.
+  Pure ASGI to avoid Starlette BaseHTTPMiddleware's body-buffering
+  quirks with streaming responses.
 - BodySizeLimitMiddleware: rejects requests whose Content-Length (or actual
   streamed size) exceeds MAX_BODY_BYTES with 413 Payload Too Large.
 """
@@ -10,24 +10,20 @@
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-# Single source of truth — the date string. SUNSET_DATE and DEPRECATION_DOC
-# are derived. Bumping API_VERSION updates all three consistently; bumping
-# only one would silently rot the others.
 API_VERSION = "2026-05-02"
-SUNSET_DATE = (date.fromisoformat(API_VERSION) + timedelta(days=365)).isoformat()
-DEPRECATION_DOC = f"https://scryer.io/docs/migrations/{API_VERSION}"
 
 MAX_BODY_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
 class ApiVersionHeadersMiddleware:
-    """Adds Scryer-Version, Sunset, and Link (deprecation) headers to every
-    HTTP response. Pure ASGI — wraps the `send` callable and injects on
-    `http.response.start`."""
+    """Adds the Scryer-Version response header. Pure ASGI — wraps the
+    `send` callable and injects on `http.response.start`. The Sunset and
+    Link/deprecation headers were dropped: there's no actual URL-versioning
+    scheme (/api/v1, /api/v2) behind them, so advertising a sunset date
+    we wouldn't honor was misleading."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -41,8 +37,6 @@ class ApiVersionHeadersMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.append((b"scryer-version", API_VERSION.encode()))
-                headers.append((b"sunset", SUNSET_DATE.encode()))
-                headers.append((b"link", f'<{DEPRECATION_DOC}>; rel="deprecation"'.encode()))
                 message["headers"] = headers
             await send(message)
 

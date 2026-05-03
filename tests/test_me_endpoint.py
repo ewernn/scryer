@@ -41,8 +41,6 @@ async def test_me_returns_identity_and_top_resources(
 async def test_response_carries_version_headers(client: AsyncClient) -> None:
     r = await client.get("/api/v1/healthz")
     assert r.headers.get("Scryer-Version") == "2026-05-02"
-    assert r.headers.get("Sunset") == "2027-05-02"
-    assert "deprecation" in r.headers.get("Link", "")
     assert "X-Request-ID" in r.headers
 
 
