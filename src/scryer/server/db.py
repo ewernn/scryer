@@ -89,6 +89,38 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
+async def apply_workspace_context(
+    session: AsyncSession,
+    workspace_id: str | object,
+    *,
+    user_id: str | object | None = None,
+) -> None:
+    """Apply RLS GUCs to the session's CURRENT transaction immediately AND
+    stash in session.info for any future transactions.
+
+    The `after_begin` listener handles the case where session.info is already
+    set when the transaction opens. This helper is the late-binding companion:
+    when workspace_id only becomes known mid-flow (HTTP routes resolve the
+    workspace via `{workspace_slug}` param after the dep chain has already
+    opened a session; signup creates a personal workspace partway through
+    the request), call this instead of just mutating session.info — that
+    mutation alone won't reach the open transaction's SET LOCAL.
+
+    Idempotent: safe to call repeatedly, including after the listener has
+    already fired with the same value."""
+    session.info["workspace_id"] = workspace_id
+    await session.execute(
+        text("SELECT set_config('app.current_workspace_id', :wid, true)"),
+        {"wid": str(workspace_id)},
+    )
+    if user_id is not None:
+        session.info["current_user_id"] = user_id
+        await session.execute(
+            text("SELECT set_config('app.current_user_id', :uid, true)"),
+            {"uid": str(user_id)},
+        )
+
+
 @asynccontextmanager
 async def with_workspace_context(
     session: AsyncSession,
@@ -96,20 +128,11 @@ async def with_workspace_context(
     *,
     user_id: str | object | None = None,
 ) -> AsyncIterator[None]:
-    """Set RLS context for callers that don't go through HTTP (cron workers,
-    tests, internal scripts). Apply BEFORE the next statement opens a
-    transaction; the listener consumes session.info on `after_begin`.
-
-    Usage:
-        async with with_workspace_context(session, ws.id):
-            await session.execute(select(Run).where(...))
-
-    Pass `user_id=` if your queries also need to satisfy auth-table RLS
-    policies that gate on `app.current_user_id` (workspace_members,
-    project_members)."""
-    session.info["workspace_id"] = workspace_id
-    if user_id is not None:
-        session.info["current_user_id"] = user_id
+    """Async ctx-mgr wrapper around `apply_workspace_context` for non-HTTP
+    callers (cron workers, tests, internal scripts). Sets the GUC for the
+    enclosed block; subsequent transactions in the same session inherit
+    via session.info."""
+    await apply_workspace_context(session, workspace_id, user_id=user_id)
     try:
         yield
     finally:

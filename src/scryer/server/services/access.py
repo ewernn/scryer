@@ -14,11 +14,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
-from scryer.server.db import get_session
+from scryer.server.db import apply_workspace_context, get_session
 from scryer.server.models.auth import (
     Project,
     ProjectMember,
@@ -147,12 +147,13 @@ async def require_workspace_from_path(
     from scryer.server.services.workspaces import get_workspace_by_slug
 
     ws = await get_workspace_by_slug(session, workspace_slug)
-    await assert_workspace_member(session, principal, ws.id)
     request.state.workspace_id = ws.id
-    session.info["workspace_id"] = ws.id
     if principal.kind == PrincipalKind.user:
         request.state.current_user_id = principal.id
-        session.info["current_user_id"] = principal.id
+        await apply_workspace_context(session, ws.id, user_id=principal.id)
+    else:
+        await apply_workspace_context(session, ws.id)
+    await assert_workspace_member(session, principal, ws.id)
     return ws.id
 
 
@@ -172,6 +173,10 @@ async def set_user_context_dep(
     if principal.kind == PrincipalKind.user:
         request.state.current_user_id = principal.id
         session.info["current_user_id"] = principal.id
+        await session.execute(
+            text("SELECT set_config('app.current_user_id', :uid, true)"),
+            {"uid": str(principal.id)},
+        )
     return principal
 
 

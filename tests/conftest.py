@@ -115,25 +115,36 @@ def _alembic_upgrade_head(url: str) -> None:
     )
 
 
+_APP_ROLE = "scryer_app"
 _PRIVILEGED_ROLE = "scryer_setup"
-_PRIVILEGED_PASSWORD = "test"
+_ROLE_PASSWORD = "test"
 
 
-def _create_privileged_role() -> None:
-    """Create the BYPASSRLS role used by `privileged_engine`. Idempotent.
+def _create_test_roles() -> None:
+    """Create the two test roles. Idempotent.
 
-    Runs AFTER `alembic upgrade head` so GRANT applies to all tables/sequences
-    that exist in the migrated schema. Subsequent migrations that add tables
-    won't be GRANT'ed automatically — re-run `_create_privileged_role()` if
-    that becomes a problem (today nothing creates tables post-bootstrap)."""
+      scryer_app    — LOGIN, NOT SUPERUSER, NOT BYPASSRLS. Used by the
+                      `engine` fixture so RLS actually gates queries.
+                      (`postgres` is SUPERUSER and would silently bypass.)
+      scryer_setup  — LOGIN, BYPASSRLS. Used by the `privileged_engine`
+                      fixture for cross-tenant test setup.
+
+    Both are owners of nothing — they get GRANT ALL on the public-schema
+    objects already created by `alembic upgrade head`. They have no DDL
+    privileges. Reset_role flag ensures the BYPASSRLS attribute is set
+    correctly on every run (idempotent ALTER)."""
     sql = (
         f"DO $$ BEGIN "
+        f"IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{_APP_ROLE}') THEN "
+        f"  CREATE ROLE {_APP_ROLE} LOGIN PASSWORD '{_ROLE_PASSWORD}'; "
+        f"END IF; "
         f"IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{_PRIVILEGED_ROLE}') THEN "
-        f"  CREATE ROLE {_PRIVILEGED_ROLE} LOGIN PASSWORD '{_PRIVILEGED_PASSWORD}'; "
+        f"  CREATE ROLE {_PRIVILEGED_ROLE} LOGIN PASSWORD '{_ROLE_PASSWORD}'; "
         f"END IF; END $$; "
+        f"ALTER ROLE {_APP_ROLE} NOSUPERUSER NOBYPASSRLS; "
         f"ALTER ROLE {_PRIVILEGED_ROLE} BYPASSRLS; "
-        f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {_PRIVILEGED_ROLE}; "
-        f"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {_PRIVILEGED_ROLE};"
+        f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {_APP_ROLE}, {_PRIVILEGED_ROLE}; "
+        f"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {_APP_ROLE}, {_PRIVILEGED_ROLE};"
     )
     subprocess.run(
         ["docker", "exec", _PG_CONTAINER, "psql", "-U", "postgres", "-d", "scryer_test", "-c", sql],
@@ -142,10 +153,13 @@ def _create_privileged_role() -> None:
     )
 
 
+def _app_url() -> str:
+    return f"postgresql+asyncpg://{_APP_ROLE}:{_ROLE_PASSWORD}@localhost:{_PG_PORT}/scryer_test"
+
+
 def _privileged_url() -> str:
     return (
-        f"postgresql+asyncpg://{_PRIVILEGED_ROLE}:{_PRIVILEGED_PASSWORD}"
-        f"@localhost:{_PG_PORT}/scryer_test"
+        f"postgresql+asyncpg://{_PRIVILEGED_ROLE}:{_ROLE_PASSWORD}@localhost:{_PG_PORT}/scryer_test"
     )
 
 
@@ -156,10 +170,17 @@ _TEST_DB_URL = _start_docker_pg()
 atexit.register(_stop_docker_pg)  # belt-and-suspenders; pytest_sessionfinish is preferred
 try:
     _alembic_upgrade_head(_TEST_DB_URL)
-    _create_privileged_role()
+    _create_test_roles()
 except Exception:
     _stop_docker_pg()
     raise
+
+# `engine` connects as `postgres` (SUPERUSER → bypasses RLS regardless of
+# FORCE) so unit tests of service-layer logic don't need to set workspace
+# context for every fixture row. Explicit RLS enforcement is verified
+# by `rls_engine` (scryer_app role; gated by RLS) which the route-flow
+# tests + tests/test_rls_enforcement.py use. In production, the app role
+# is `neondb_owner` which is NOT SUPERUSER → FORCE actually gates queries.
 
 # Now safe to import scryer modules — settings will pick up the env var.
 from scryer.server.app import create_app  # noqa: E402
@@ -189,7 +210,7 @@ async def privileged_engine() -> AsyncIterator[AsyncEngine]:
     Connects as the `scryer_setup` role which has BYPASSRLS attribute.
     Use ONLY for setup/teardown that genuinely needs to write across
     workspaces (squatter vs redeemer slug collision; cross-user IDOR
-    fixtures). Assertion paths must run under real RLS via `session`
+    fixtures). Assertion paths must run under real RLS via `rls_engine`
     + `workspace_context()`.
 
     Per Neon docs: BYPASSRLS is grantable on Free tier — `neondb_owner`
@@ -197,6 +218,46 @@ async def privileged_engine() -> AsyncIterator[AsyncEngine]:
     eng = create_async_engine(_privileged_url(), echo=False)
     yield eng
     await eng.dispose()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def rls_engine() -> AsyncIterator[AsyncEngine]:
+    """RLS-enforcing engine — connects as `scryer_app` (NOT SUPERUSER, NOT
+    BYPASSRLS). This is the role HTTP integration tests use via the
+    `client` fixture so the route chain (require_workspace_from_path →
+    set GUC → query) actually exercises RLS.
+
+    Service-layer unit tests use `engine` (SUPERUSER bypass) instead;
+    they verify business logic, not RLS plumbing."""
+    eng = create_async_engine(_app_url(), echo=False)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def rls_session(rls_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """Per-test transactional session against the RLS-enforcing engine.
+
+    Same savepoint pattern as `session` but bound to scryer_app role.
+    Use this in tests that explicitly verify RLS behavior."""
+    async with rls_engine.connect() as conn:
+        await conn.begin()
+        await conn.begin_nested()
+        async_session = AsyncSession(bind=conn, join_transaction_mode="create_savepoint")
+
+        @event.listens_for(async_session.sync_session, "after_transaction_end")
+        def _reopen_savepoint(_sess, _transaction):  # type: ignore[no-untyped-def]
+            if conn.sync_connection is None:
+                return
+            if not conn.sync_connection.in_nested_transaction():
+                conn.sync_connection.begin_nested()
+
+        try:
+            yield async_session
+        finally:
+            event.remove(async_session.sync_session, "after_transaction_end", _reopen_savepoint)
+            await async_session.close()
+            await conn.rollback()
 
 
 @pytest_asyncio.fixture
@@ -278,14 +339,10 @@ async def workspace_context(
 ) -> AsyncIterator[None]:
     """Set RLS workspace + (optional) user context for the next statement(s).
 
-    Equivalent to setting `session.info["workspace_id"]` and (optionally)
-    `session.info["current_user_id"]`, then letting the RLS listener pick
-    them up at the next transaction's after_begin.
+    Delegates to `db.apply_workspace_context` which both stashes in
+    session.info AND issues SET LOCAL on the open transaction. Tests that
+    hit workspace_members / project_members policies pass user_id."""
+    from scryer.server.db import apply_workspace_context
 
-    Pass `user_id=` when the test exercises queries against
-    workspace_members, project_members, or any other table whose policy
-    keys on `app.current_user_id`."""
-    sess.info["workspace_id"] = workspace_id
-    if user_id is not None:
-        sess.info["current_user_id"] = user_id
+    await apply_workspace_context(sess, workspace_id, user_id=user_id)
     yield

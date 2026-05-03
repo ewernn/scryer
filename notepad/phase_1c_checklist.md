@@ -179,11 +179,51 @@ Once RLS is on, the failure mode is silent zero-row results. Watch for:
 
 ## Definition of done
 
-- [ ] Item 1: db.py listener extended; tests pass
-- [ ] Item 2: 3 auth-table RLS policies added to draft migration
-- [ ] Item 3: privileged_engine fixture working; cross-tenant tests pass
-- [ ] Item 4: migration moved to versions/; `make test-migrations` ✓;
-      `make test` ✓ (full suite); pushed; prod healthy
-- [ ] scryer_notepad.md updated: prod head migration is now
-      `c4f2e1b9a3d5`; "Active wave" pointer changes to next wave
-- [ ] This file moved to `notepad/done/` or deleted
+- [x] Item 1: db.py listener extended; tests pass (commit 4aeed3a)
+- [x] Item 2 (revised): 3 auth-table policies SKIPPED. Service-layer
+      already constrains by user_id via assert_workspace_member /
+      assert_project_access; api_keys lookup-by-hash MUST be unrestricted
+      (AuthN flow happens before workspace context); api_key_usage isn't
+      written by anything yet. Decision documented in migration docstring.
+- [x] Item 3: privileged_engine fixture working (commit c1dc39e); plus
+      rls_engine + rls_session fixtures using scryer_app role (this commit).
+- [x] Item 3a: cross-tenant test wrappings updated for user_id (commit 3a2850e)
+- [x] WebhookDelivery added to migration (workspace_id col + trigger +
+      RLS policy)
+- [x] FORCE ROW LEVEL SECURITY added to migration. Without it, the table
+      owner role (neondb_owner in prod, postgres in tests) silently bypasses
+      RLS — Neon's docs explicitly warn about this.
+- [x] apply_workspace_context primitive added to db.py — late-binding
+      companion to the after_begin listener. Used by require_workspace_from_path
+      and workspace_context. THIS is the linchpin: SET LOCAL fires
+      synchronously when GUC is known mid-flow.
+
+## Remaining for Phase 1c-final (the actual ENABLE RLS deploy)
+
+These were uncovered while doing items 1-3 above; they're MANDATORY before
+moving the migration to versions/ + shipping to prod.
+
+- [ ] Refactor service functions that INSERT into RLS-policied tables to
+      call apply_workspace_context at the top OR document that all callers
+      must already be in workspace context. Affected:
+        create_project, push_dataset, push_scorer, push_agent, push_prompt,
+        push_task, push_tool, queue_run, create_credential, create_webhook,
+        create_comment, create_collection, create_suite, create_trigger
+      Most are only ever called from routes (which set GUC via the dep).
+      Audit each: if it's only-route-called, no change needed. If it's
+      called from signup/redeem flows or scripts, add apply_workspace_context.
+- [ ] Specifically: signup_with_invitation + redeem_invitation create
+      personal workspaces and projects across workspace boundaries. The
+      `_create_personal_workspace` helper must call apply_workspace_context
+      after creating the workspace, before creating the project.
+- [ ] Add `tests/test_rls_enforcement.py` (was deleted from this commit)
+      using rls_session fixture — proves RLS denies cross-tenant + denies
+      no-GUC reads.
+- [ ] Update `client` fixture to optionally use rls_engine for HTTP route
+      tests (verifies the route chain sets GUC correctly).
+- [ ] Move migration migrations/draft/c4f2e1b9a3d5_enable_rls.py →
+      migrations/versions/. Run `make test-migrations`. Run `make test`
+      (full suite — both engine and rls_engine paths). Run `make test-rls`
+      (new make target if it makes sense).
+- [ ] Push + verify Railway healthz returns db_ok: true.
+- [ ] Update scryer_notepad.md (active wave + prod head).
