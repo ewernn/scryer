@@ -71,8 +71,8 @@ async def test_rls_blocks_cross_tenant_dataset_select(rls_session: AsyncSession)
     await apply_workspace_context(rls_session, ws_b.id)
     own = (await rls_session.execute(select(Dataset).where(Dataset.id == ds_b.id))).scalars().all()
     foreign = (
-        await rls_session.execute(select(Dataset).where(Dataset.id == ds_a.id))
-    ).scalars().all()
+        (await rls_session.execute(select(Dataset).where(Dataset.id == ds_a.id))).scalars().all()
+    )
     assert len(own) == 1, "ws_b context must see its own dataset"
     assert foreign == [], "ws_b context must NOT see ws_a's dataset"
 

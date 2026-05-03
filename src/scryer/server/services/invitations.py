@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from scryer.server.db import apply_workspace_context
 from scryer.server.models.auth import (
     Invitation,
     Project,
@@ -16,7 +17,6 @@ from scryer.server.models.auth import (
     User,
     WorkspaceMember,
 )
-from scryer.server.db import apply_workspace_context
 from scryer.server.models.enums import InvitationStatus, ProjectRole, WorkspaceRole
 from scryer.server.services.errors import (
     AuthError,

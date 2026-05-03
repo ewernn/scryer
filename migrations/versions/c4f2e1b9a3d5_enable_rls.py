@@ -163,8 +163,7 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         op.execute(
-            f"CREATE POLICY {table}_workspace_isolation ON {table} "
-            f"USING (workspace_id = {_guc})"
+            f"CREATE POLICY {table}_workspace_isolation ON {table} USING (workspace_id = {_guc})"
         )
 
     for table in _RLS_TABLES_NULLABLE:

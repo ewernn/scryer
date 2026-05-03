@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal, get_principal
-from scryer.server.db import get_session
+from scryer.server.db import apply_workspace_context, get_session
 from scryer.server.models.eval import Dataset, Scorer
 from scryer.server.services.access import set_user_context_dep
 from scryer.server.services.projects import list_projects_for_user_in_workspace
@@ -65,10 +65,18 @@ async def me(
     workspaces = await list_workspaces_for_user(session, principal.id)
     ws_summaries = [{"id": str(w.id), "slug": w.slug, "name": w.name} for w in workspaces[:5]]
     projects: list[dict[str, Any]] = []
+    datasets: list[dict[str, Any]] = []
+    scorers: list[dict[str, Any]] = []
+
+    # RLS: each workspace scopes its own projects/datasets/scorers via the
+    # current_workspace_id GUC. Switch context per workspace before the
+    # per-workspace SELECTs (otherwise rows are silently filtered).
     for w in workspaces[:3]:  # cap at 3 workspaces × 5 projects = 15 lookups max
+        await apply_workspace_context(session, w.id, user_id=principal.id)
         projs = await list_projects_for_user_in_workspace(
             session, workspace_id=w.id, user_id=principal.id
         )
+        ws_project_ids = [str(p.id) for p in projs[:5]]
         for p in projs[:5]:
             projects.append(
                 {
@@ -78,40 +86,42 @@ async def me(
                     "name": p.name,
                 }
             )
-    project_ids = [p["id"] for p in projects]
-    datasets: list[dict[str, Any]] = []
-    scorers: list[dict[str, Any]] = []
-    if project_ids:
-        import uuid as _u
+        if ws_project_ids and len(datasets) < 5:
+            import uuid as _u
 
-        ds_rows = list(
-            (
-                await session.execute(
-                    select(Dataset)
-                    .where(Dataset.project_id.in_([_u.UUID(p) for p in project_ids[:5]]))
-                    .where(Dataset.archived_at.is_(None))
-                    .order_by(Dataset.created_at.desc())
-                    .limit(5)
-                )
-            ).scalars()
-        )
-        datasets = [
-            {"id": str(d.id), "slug": d.slug, "version": d.version, "name": d.name} for d in ds_rows
-        ]
-        sc_rows = list(
-            (
-                await session.execute(
-                    select(Scorer)
-                    .where(Scorer.project_id.in_([_u.UUID(p) for p in project_ids[:5]]))
-                    .where(Scorer.archived_at.is_(None))
-                    .order_by(Scorer.created_at.desc())
-                    .limit(5)
-                )
-            ).scalars()
-        )
-        scorers = [
-            {"id": str(s.id), "slug": s.slug, "version": s.version, "name": s.name} for s in sc_rows
-        ]
+            ds_rows = list(
+                (
+                    await session.execute(
+                        select(Dataset)
+                        .where(Dataset.project_id.in_([_u.UUID(p) for p in ws_project_ids]))
+                        .where(Dataset.archived_at.is_(None))
+                        .order_by(Dataset.created_at.desc())
+                        .limit(5 - len(datasets))
+                    )
+                ).scalars()
+            )
+            datasets.extend(
+                {"id": str(d.id), "slug": d.slug, "version": d.version, "name": d.name}
+                for d in ds_rows
+            )
+        if ws_project_ids and len(scorers) < 5:
+            import uuid as _u
+
+            sc_rows = list(
+                (
+                    await session.execute(
+                        select(Scorer)
+                        .where(Scorer.project_id.in_([_u.UUID(p) for p in ws_project_ids]))
+                        .where(Scorer.archived_at.is_(None))
+                        .order_by(Scorer.created_at.desc())
+                        .limit(5 - len(scorers))
+                    )
+                ).scalars()
+            )
+            scorers.extend(
+                {"id": str(s.id), "slug": s.slug, "version": s.version, "name": s.name}
+                for s in sc_rows
+            )
 
     return MeResponse(
         identity=IdentityOut(

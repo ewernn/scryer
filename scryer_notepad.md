@@ -8,12 +8,12 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 
 - **Live**: <https://scryer-production.up.railway.app/api/v1/healthz>
   (`db_ok: true` after every push)
-- **Migration head in prod**: `99b59febc9c0` (denormalize workspace_id);
-  pushing `c4f2e1b9a3d5` (ENABLE + FORCE RLS) this iteration
-- **Tests**: 167 passing in ~21s — includes RLS enforcement tests via the
-  new `rls_session` fixture (scryer_app role, RLS-gated)
-- **Active wave**: Phase 1c shipping; remaining items are auditing other
-  service callers + extending RLS to auth tables in a follow-up
+- **Migration head in prod**: `c4f2e1b9a3d5` (ENABLE + FORCE RLS on data
+  tables) — shipped 2026-05-03; verified via curl healthz
+- **Tests**: 167 passing in ~21s, including 4 enforcement tests via the
+  `rls_session` fixture (scryer_app role, RLS-gated)
+- **Active wave**: Phase 1c follow-ups — audit non-route service callers,
+  fix `/me` silent-empty, extend RLS to auth tables (P1c-2)
 
 ## Read order at every loop iteration
 
@@ -27,8 +27,15 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 ## Remaining queue (high-level)
 
 ```
-□ Phase 1c       — ENABLE RLS bundle (notepad/phase_1c_checklist.md)
-□ P1 Phase 2     — webhooks lease refactor, RLS-aware
+□ Phase 1c-2     — RLS gap-fixes after critic audit:
+                   - /runs routes need apply_workspace_context
+                     (Task/Run/Result tables RLS'd; URL has no slug)
+                   - cron paths (deliver-webhooks, dispatch-triggers,
+                     reap-stale-runs) need privileged engine OR per-ws iter
+                   - audit_events INSERT footgun: write_event with
+                     workspace_id != current GUC raises (consider applying
+                     context inside write_event)
+□ P1 Phase 2     — webhooks lease refactor, RLS-aware (paired with above)
 □ P1 Phase 4     — cascade-down soft-delete + idempotency_keys table
 □ R1             — audit auto-emission via SQLAlchemy listeners
 □ R2             — slug history as DB trigger

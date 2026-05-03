@@ -187,13 +187,20 @@ async def get_project_by_slug_path(
     workspace_slug: str,
     project_slug: str,
 ) -> Project:
-    """Single resolver: (ws_slug, proj_slug) → Project, with full authz check."""
+    """Single resolver: (ws_slug, proj_slug) → Project, with full authz check.
+
+    Sets RLS context to the resolved workspace (workspaces table itself
+    isn't RLS-policied so the initial slug lookup works regardless).
+    Subsequent service calls in the same request — push_dataset etc. —
+    inherit the GUC."""
     ws = await session.execute(
         select(Workspace).where(Workspace.slug == workspace_slug, Workspace.archived_at.is_(None))
     )
     ws_row = ws.scalar_one_or_none()
     if ws_row is None:
         raise NotFoundError("workspace", workspace_slug)
+    user_id = principal.id if principal.kind == PrincipalKind.user else None
+    await apply_workspace_context(session, ws_row.id, user_id=user_id)
     await assert_workspace_member(session, principal, ws_row.id)
 
     proj = await session.execute(
