@@ -33,12 +33,11 @@ boundary; update the relevant `notepad/*.md` for in-wave detail.
 ☑ R2             — slug history triggers, migration d8a719c5b2e7 in prod
 ☑ Q part         — drop Sunset header + /healthz/deep done; D2 cursor
                    pagination still pending
-☑ R4             — SA access helpers + HTTP API + 9 tests. CLI deferred.
+☑ R4             — SA access helpers + HTTP API + CLI + 9 tests
 □ P1 Phase 4     — cascade-down soft-delete + idempotency_keys table
 □ R1             — audit auto-emission via SQLAlchemy listeners
                    (LOW PRIORITY — only 5 callsites today, hand-written
                    audit gives better action labels than auto-listener)
-□ R4 part 3      — `scryer sa` CLI (create/list/key) — small follow-up
 □ P3             — outbox table only (Procrastinate deferred)
 □ Q D2           — cursor pagination on every list endpoint (~6-8h)
 ```
