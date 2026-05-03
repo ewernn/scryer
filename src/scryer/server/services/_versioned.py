@@ -8,7 +8,7 @@ import json
 import uuid
 from typing import Any, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.models.base import Base
@@ -37,7 +37,19 @@ async def next_version(
     """Returns (next_version, parent_id) for a (project, slug) pair.
 
     parent_id is the latest existing row's id, or None if this is v1.
+
+    Concurrency: SELECT MAX → +1 → INSERT is TOCTOU under concurrent
+    pushes for the same (project, slug). The UNIQUE constraint catches
+    duplicates with an opaque IntegrityError; not great for callers.
+    Fix: take a transaction-scoped advisory lock keyed by hash of
+    (project_id, slug). Concurrent pushes for the SAME slug serialize;
+    pushes for DIFFERENT slugs proceed in parallel. Lock auto-releases
+    at COMMIT/ROLLBACK.
     """
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"{project_id}|{slug}|{model.__tablename__}"},
+    )
     stmt = (
         select(model)
         .where(model.project_id == project_id, model.slug == slug)  # type: ignore[attr-defined]

@@ -22,8 +22,11 @@ from scryer.server.services.tools import push_tool
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
 
+from tests.conftest import workspace_context
+
 
 async def _project(session: AsyncSession):
+    """Returns (project, workspace_id) so tests can wrap reads in workspace_context."""
     from scryer.server.services.projects import create_project
 
     user = await create_user(session, email=f"u{uuid4().hex[:6]}@e.com", password="x" * 16)
@@ -37,11 +40,11 @@ async def _project(session: AsyncSession):
         name="t",
         owner_user_id=user.id,
     )
-    return proj
+    return proj, ws.id
 
 
 async def test_dataset_push_first_version(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, ws_id = await _project(session)
     ds = await push_dataset(
         session,
         project_id=proj.id,
@@ -52,11 +55,12 @@ async def test_dataset_push_first_version(session: AsyncSession) -> None:
     assert ds.version == 1
     assert ds.parent_id is None
     assert ds.record_count == 2
-    assert await count_records(session, ds.id) == 2
+    async with workspace_context(session, ws_id):
+        assert await count_records(session, ds.id) == 2
 
 
 async def test_dataset_push_second_version_chains(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     v1 = await push_dataset(
         session,
         project_id=proj.id,
@@ -76,32 +80,34 @@ async def test_dataset_push_second_version_chains(session: AsyncSession) -> None
 
 
 async def test_dataset_get_latest(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, ws_id = await _project(session)
     await push_dataset(session, project_id=proj.id, slug="g", name="g", records=[{"inputs": {}}])
     v2 = await push_dataset(
         session, project_id=proj.id, slug="g", name="g", records=[{"inputs": {"x": 1}}]
     )
-    latest = await get_dataset_latest(session, project_id=proj.id, slug="g")
-    assert latest.id == v2.id
+    async with workspace_context(session, ws_id):
+        latest = await get_dataset_latest(session, project_id=proj.id, slug="g")
+        assert latest.id == v2.id
 
 
 async def test_dataset_empty_records_rejected(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     with pytest.raises(ConflictError):
         await push_dataset(session, project_id=proj.id, slug="g", name="g", records=[])
 
 
 async def test_list_datasets_returns_only_latest_per_slug(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, ws_id = await _project(session)
     await push_dataset(session, project_id=proj.id, slug="a", name="A", records=[{"inputs": {}}])
     await push_dataset(session, project_id=proj.id, slug="a", name="A", records=[{"inputs": {}}])
     await push_dataset(session, project_id=proj.id, slug="b", name="B", records=[{"inputs": {}}])
-    rows = await list_datasets(session, project_id=proj.id)
-    assert {(r.slug, r.version) for r in rows} == {("a", 2), ("b", 1)}
+    async with workspace_context(session, ws_id):
+        rows = await list_datasets(session, project_id=proj.id)
+        assert {(r.slug, r.version) for r in rows} == {("a", 2), ("b", 1)}
 
 
 async def test_scorer_push(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     s = await push_scorer(
         session,
         project_id=proj.id,
@@ -114,7 +120,7 @@ async def test_scorer_push(session: AsyncSession) -> None:
 
 
 async def test_task_binding_validates_versions(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     ds = await push_dataset(
         session, project_id=proj.id, slug="d", name="d", records=[{"inputs": {}}]
     )
@@ -134,7 +140,7 @@ async def test_task_binding_validates_versions(session: AsyncSession) -> None:
 
 
 async def test_task_binding_rejects_stale_version(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     ds = await push_dataset(
         session, project_id=proj.id, slug="d", name="d", records=[{"inputs": {}}]
     )
@@ -153,7 +159,7 @@ async def test_task_binding_rejects_stale_version(session: AsyncSession) -> None
 
 
 async def test_task_agent_id_version_must_agree(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     ds = await push_dataset(
         session, project_id=proj.id, slug="d", name="d", records=[{"inputs": {}}]
     )
@@ -173,7 +179,7 @@ async def test_task_agent_id_version_must_agree(session: AsyncSession) -> None:
 
 
 async def test_full_binding_with_agent_and_prompt(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     ds = await push_dataset(
         session, project_id=proj.id, slug="d", name="d", records=[{"inputs": {}}]
     )
@@ -199,7 +205,7 @@ async def test_full_binding_with_agent_and_prompt(session: AsyncSession) -> None
 
 
 async def test_tool_push_versioning(session: AsyncSession) -> None:
-    proj = await _project(session)
+    proj, _ws_id = await _project(session)
     t1 = await push_tool(
         session, project_id=proj.id, slug="t", name="T", source_text="def t(): pass"
     )

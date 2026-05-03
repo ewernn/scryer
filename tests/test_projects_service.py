@@ -15,6 +15,7 @@ from scryer.server.services.projects import (
 )
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
+from tests.conftest import workspace_context
 
 
 async def _user(session: AsyncSession):
@@ -48,8 +49,11 @@ async def test_workspace_member_sees_workspace_visible(session: AsyncSession) ->
         owner_user_id=owner.id,
         visibility=ProjectVisibility.workspace,
     )
-    found = await list_projects_for_user_in_workspace(session, workspace_id=ws.id, user_id=owner.id)
-    assert any(p.id == proj.id for p in found)
+    async with workspace_context(session, ws.id):
+        found = await list_projects_for_user_in_workspace(
+            session, workspace_id=ws.id, user_id=owner.id
+        )
+        assert any(p.id == proj.id for p in found)
 
 
 async def test_workspace_member_sees_private_only_if_explicit_member(
@@ -71,18 +75,19 @@ async def test_workspace_member_sees_private_only_if_explicit_member(
         owner_user_id=owner.id,
         visibility=ProjectVisibility.private,
     )
-    found = await list_projects_for_user_in_workspace(
-        session, workspace_id=ws.id, user_id=member.id
-    )
-    assert all(p.id != private_proj.id for p in found)
-    session.add(
-        ProjectMember(project_id=private_proj.id, user_id=member.id, role=ProjectRole.member)
-    )
-    await session.flush()
-    found2 = await list_projects_for_user_in_workspace(
-        session, workspace_id=ws.id, user_id=member.id
-    )
-    assert any(p.id == private_proj.id for p in found2)
+    async with workspace_context(session, ws.id):
+        found = await list_projects_for_user_in_workspace(
+            session, workspace_id=ws.id, user_id=member.id
+        )
+        assert all(p.id != private_proj.id for p in found)
+        session.add(
+            ProjectMember(project_id=private_proj.id, user_id=member.id, role=ProjectRole.member)
+        )
+        await session.flush()
+        found2 = await list_projects_for_user_in_workspace(
+            session, workspace_id=ws.id, user_id=member.id
+        )
+        assert any(p.id == private_proj.id for p in found2)
 
 
 async def test_non_member_sees_nothing(session: AsyncSession) -> None:
@@ -90,10 +95,11 @@ async def test_non_member_sees_nothing(session: AsyncSession) -> None:
     outsider = await _user(session)
     ws = await _ws(session, owner.id)
     await create_project(session, workspace_id=ws.id, slug="p1", name="p1", owner_user_id=owner.id)
-    found = await list_projects_for_user_in_workspace(
-        session, workspace_id=ws.id, user_id=outsider.id
-    )
-    assert found == []
+    async with workspace_context(session, ws.id):
+        found = await list_projects_for_user_in_workspace(
+            session, workspace_id=ws.id, user_id=outsider.id
+        )
+        assert found == []
 
 
 async def test_archive_project_filters_out(session: AsyncSession) -> None:
@@ -103,5 +109,8 @@ async def test_archive_project_filters_out(session: AsyncSession) -> None:
         session, workspace_id=ws.id, slug="kill", name="kill", owner_user_id=owner.id
     )
     await archive_project(session, proj.id)
-    found = await list_projects_for_user_in_workspace(session, workspace_id=ws.id, user_id=owner.id)
-    assert all(p.id != proj.id for p in found)
+    async with workspace_context(session, ws.id):
+        found = await list_projects_for_user_in_workspace(
+            session, workspace_id=ws.id, user_id=owner.id
+        )
+        assert all(p.id != proj.id for p in found)

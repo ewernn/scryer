@@ -10,12 +10,16 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+# Single source of truth — the date string. SUNSET_DATE and DEPRECATION_DOC
+# are derived. Bumping API_VERSION updates all three consistently; bumping
+# only one would silently rot the others.
 API_VERSION = "2026-05-02"
-SUNSET_DATE = "2027-05-02"
-DEPRECATION_DOC = "https://scryer.io/docs/migrations/2026-05-02"
+SUNSET_DATE = (date.fromisoformat(API_VERSION) + timedelta(days=365)).isoformat()
+DEPRECATION_DOC = f"https://scryer.io/docs/migrations/{API_VERSION}"
 
 MAX_BODY_BYTES = 10 * 1024 * 1024  # 10 MiB
 

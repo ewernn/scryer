@@ -34,6 +34,8 @@ from scryer.server.services.usage import (
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
 
+from tests.conftest import workspace_context
+
 
 async def _setup(session: AsyncSession):
     user = await create_user(session, email=f"u{uuid4().hex[:6]}@e.com", password="x" * 16)
@@ -98,8 +100,9 @@ async def test_audit_event_list_filters_by_resource(session: AsyncSession) -> No
         resource_type="dataset",
         resource_id=rid,
     )
-    rows = await list_events(session, resource_type="dataset", resource_id=rid)
-    assert len(rows) == 2
+    async with workspace_context(session, ws.id):
+        rows = await list_events(session, resource_type="dataset", resource_id=rid)
+        assert len(rows) == 2
 
 
 async def test_tag_create_and_apply(session: AsyncSession) -> None:
@@ -107,18 +110,20 @@ async def test_tag_create_and_apply(session: AsyncSession) -> None:
     t = await create_tag(session, workspace_id=ws.id, name="urgent")
     rid = uuid4()
     await apply_tag(session, tag_id=t.id, resource_type="run", resource_id=rid)
-    tags = await list_tags_for_resource(session, resource_type="run", resource_id=rid)
-    assert {t.name for t in tags} == {"urgent"}
-    await remove_tag(session, tag_id=t.id, resource_type="run", resource_id=rid)
-    assert await list_tags_for_resource(session, resource_type="run", resource_id=rid) == []
+    async with workspace_context(session, ws.id):
+        tags = await list_tags_for_resource(session, resource_type="run", resource_id=rid)
+        assert {t.name for t in tags} == {"urgent"}
+        await remove_tag(session, tag_id=t.id, resource_type="run", resource_id=rid)
+        assert await list_tags_for_resource(session, resource_type="run", resource_id=rid) == []
 
 
 async def test_tag_list(session: AsyncSession) -> None:
     _, ws, _ = await _setup(session)
     await create_tag(session, workspace_id=ws.id, name="a")
     await create_tag(session, workspace_id=ws.id, name="b")
-    rows = await list_tags(session, ws.id)
-    assert {t.name for t in rows} == {"a", "b"}
+    async with workspace_context(session, ws.id):
+        rows = await list_tags(session, ws.id)
+        assert {t.name for t in rows} == {"a", "b"}
 
 
 async def test_suite_execute_runs_all_tasks(session: AsyncSession) -> None:
@@ -155,15 +160,18 @@ async def test_suite_execute_runs_all_tasks(session: AsyncSession) -> None:
         scorer_version=sc.version,
     )
 
-    suite = await create_suite(session, project_id=proj.id, slug="reg", name="Regression")
-    await add_task_to_suite(session, suite_id=suite.id, task_id=t1.id, position=1)
-    await add_task_to_suite(session, suite_id=suite.id, task_id=t2.id, position=2)
+    async with workspace_context(session, ws.id):
+        suite = await create_suite(session, project_id=proj.id, slug="reg", name="Regression")
+        await add_task_to_suite(session, suite_id=suite.id, task_id=t1.id, position=1)
+        await add_task_to_suite(session, suite_id=suite.id, task_id=t2.id, position=2)
 
-    sr = await execute_suite(session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id)
-    assert sr.completed_at is not None
-    runs = await list_runs_in_suite(session, sr.id)
-    assert len(runs) == 2
-    assert all(r.status.value == "done" for r in runs)
+        sr = await execute_suite(
+            session, suite_id=suite.id, workspace_id=ws.id, project_id=proj.id
+        )
+        assert sr.completed_at is not None
+        runs = await list_runs_in_suite(session, sr.id)
+        assert len(runs) == 2
+        assert all(r.status.value == "done" for r in runs)
 
 
 async def test_usage_record_and_aggregate(session: AsyncSession) -> None:
@@ -190,7 +198,8 @@ async def test_usage_record_and_aggregate(session: AsyncSession) -> None:
         output_tokens=10,
         cost_usd=Decimal("0.0061"),
     )
-    total = await total_cost_for_workspace_since(
-        session, workspace_id=ws.id, since=datetime.now(UTC) - timedelta(hours=1)
-    )
-    assert total == Decimal("0.0184")
+    async with workspace_context(session, ws.id):
+        total = await total_cost_for_workspace_since(
+            session, workspace_id=ws.id, since=datetime.now(UTC) - timedelta(hours=1)
+        )
+        assert total == Decimal("0.0184")
