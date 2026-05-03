@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.auth import Principal
+from scryer.server.db import apply_workspace_context
 from scryer.server.models.audit import AuditEvent
 from scryer.server.models.enums import ActorKind, PrincipalKind
 
@@ -47,6 +48,16 @@ async def write_event(
         kind = actor_kind or ActorKind.system
         au = None
         sa = None
+
+    # audit_events is RLS-policied (USING workspace_id IS NULL OR matches GUC).
+    # PG uses the USING clause as the implicit WITH CHECK for INSERT, so any
+    # write_event(workspace_id=X) called while the current GUC is Y would
+    # raise. Switch context first to defend against caller drift — common
+    # case is the signup flow where redeem_invitation has just set GUC to
+    # the new personal workspace and the audit row belongs to the inviter
+    # workspace.
+    if workspace_id is not None:
+        await apply_workspace_context(session, workspace_id)
 
     ev = AuditEvent(
         action=action,

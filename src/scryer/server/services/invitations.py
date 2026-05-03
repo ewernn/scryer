@@ -155,10 +155,6 @@ async def redeem_invitation(
             )
 
     inv.used_by_user_id = user.id
-    # Restore RLS context to the inviter's workspace so the caller's audit
-    # write (write_event with workspace_id=inv.workspace_id in the signup
-    # handler) satisfies the audit_events policy.
-    await apply_workspace_context(session, inv.workspace_id, user_id=user.id)
     await session.flush()
     return user, inv
 
