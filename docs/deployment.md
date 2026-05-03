@@ -99,6 +99,51 @@ to verify every migration is reversible, then re-applies. Catches
 asyncpg multi-statement issues, missing downgrade implementations, and
 ORM/schema drift the moment they're introduced.
 
+## RLS rollback runbook
+
+Once the Phase 1c migration (in `migrations/draft/` until ready) lands
+and ENABLE ROW LEVEL SECURITY is on every multi-tenant table, a missing
+`SET LOCAL app.current_workspace_id` results in queries returning ZERO
+rows, NOT an error. This is the scariest failure mode — it's silent.
+
+**Detection signals:**
+- New endpoint suddenly returns empty list/404 in prod after deploy
+- `/healthz/deep` (when D3 lands) fails the canary "I can SELECT a row"
+  check inside a known workspace context
+- Sentry captures a NotFoundError that wasn't there before
+
+**Kill switch (single command per table):**
+
+```sql
+ALTER TABLE <table> DISABLE ROW LEVEL SECURITY;
+```
+
+Or via Alembic, full rollback:
+
+```bash
+~/.local/bin/uv run alembic downgrade -1   # reverts the RLS migration
+```
+
+The downgrade drops all `*_workspace_isolation` policies and disables
+RLS on every table the upgrade touched. Subsequent queries return all
+rows again as before — this is a complete revert; you can re-apply once
+the underlying issue is fixed.
+
+**If you need partial rollback (one table only):**
+
+```sql
+DROP POLICY IF EXISTS <table>_workspace_isolation ON <table>;
+ALTER TABLE <table> DISABLE ROW LEVEL SECURITY;
+```
+
+Leaves other tables protected.
+
+**Defensive: before enabling in prod**, run `make test-migrations` AND
+`make test` to verify the full suite passes with RLS on. The Phase 1c
+draft migration in `migrations/draft/` works via `make test-migrations`
+but the full suite has tests against auth tables (api_keys etc.) that
+need RLS-aware refactor first.
+
 ## Cron endpoints
 
 The `/internal/*` namespace is gated by `Authorization: Bearer $INTERNAL_TOKEN`.

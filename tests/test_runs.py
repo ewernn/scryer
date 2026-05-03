@@ -23,6 +23,8 @@ from scryer.server.services.tasks import push_task
 from scryer.server.services.users import create_user
 from scryer.server.services.workspaces import create_workspace
 
+from tests.conftest import workspace_context
+
 
 async def _setup_run(session: AsyncSession, *, scorer_src: str):
     user = await create_user(session, email=f"u{uuid4().hex[:6]}@e.com", password="x" * 16)
@@ -70,9 +72,10 @@ async def test_run_executor_happy_path(session: AsyncSession) -> None:
     assert finished.n_done == 3
     assert finished.n_failed == 0
 
-    results = await list_results(session, run.id)
-    assert {r.record_id for r in results} == {1, 2, 3}
-    assert {float(r.score_value or 0) for r in results} == {1.0, 2.0, 3.0}
+    async with workspace_context(session, ws.id):
+        results = await list_results(session, run.id)
+        assert {r.record_id for r in results} == {1, 2, 3}
+        assert {float(r.score_value or 0) for r in results} == {1.0, 2.0, 3.0}
 
 
 @pytest.mark.slow
@@ -84,8 +87,9 @@ async def test_run_with_failing_scorer(session: AsyncSession) -> None:
     finished = await execute_run(session, run_id=run.id)
     assert finished.status == RunStatus.failed
     assert finished.n_failed == 3
-    results = await list_results(session, run.id)
-    assert all(r.error and "boom" in r.error for r in results)
+    async with workspace_context(session, ws.id):
+        results = await list_results(session, run.id)
+        assert all(r.error and "boom" in r.error for r in results)
 
 
 @pytest.mark.slow
