@@ -115,6 +115,40 @@ def _alembic_upgrade_head(url: str) -> None:
     )
 
 
+_PRIVILEGED_ROLE = "scryer_setup"
+_PRIVILEGED_PASSWORD = "test"
+
+
+def _create_privileged_role() -> None:
+    """Create the BYPASSRLS role used by `privileged_engine`. Idempotent.
+
+    Runs AFTER `alembic upgrade head` so GRANT applies to all tables/sequences
+    that exist in the migrated schema. Subsequent migrations that add tables
+    won't be GRANT'ed automatically — re-run `_create_privileged_role()` if
+    that becomes a problem (today nothing creates tables post-bootstrap)."""
+    sql = (
+        f"DO $$ BEGIN "
+        f"IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{_PRIVILEGED_ROLE}') THEN "
+        f"  CREATE ROLE {_PRIVILEGED_ROLE} LOGIN PASSWORD '{_PRIVILEGED_PASSWORD}'; "
+        f"END IF; END $$; "
+        f"ALTER ROLE {_PRIVILEGED_ROLE} BYPASSRLS; "
+        f"GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {_PRIVILEGED_ROLE}; "
+        f"GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {_PRIVILEGED_ROLE};"
+    )
+    subprocess.run(
+        ["docker", "exec", _PG_CONTAINER, "psql", "-U", "postgres", "-d", "scryer_test", "-c", sql],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _privileged_url() -> str:
+    return (
+        f"postgresql+asyncpg://{_PRIVILEGED_ROLE}:{_PRIVILEGED_PASSWORD}"
+        f"@localhost:{_PG_PORT}/scryer_test"
+    )
+
+
 # ── Docker bootstrap (module-load) ─────────────────────────────────────────
 # Done at import time so SCRYER_TEST_DATABASE_URL is set before any scryer
 # module is imported (and lru_cache-pins the prod URL).
@@ -122,6 +156,7 @@ _TEST_DB_URL = _start_docker_pg()
 atexit.register(_stop_docker_pg)  # belt-and-suspenders; pytest_sessionfinish is preferred
 try:
     _alembic_upgrade_head(_TEST_DB_URL)
+    _create_privileged_role()
 except Exception:
     _stop_docker_pg()
     raise
@@ -143,6 +178,23 @@ def pytest_sessionfinish(session, exitstatus):  # type: ignore[no-untyped-def]
 async def engine() -> AsyncIterator[AsyncEngine]:
     """One engine per pytest session, against the migrated docker postgres."""
     eng = create_async_engine(_TEST_DB_URL, echo=False)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture(scope="session")
+async def privileged_engine() -> AsyncIterator[AsyncEngine]:
+    """BYPASSRLS engine — for cross-tenant test data setup ONLY.
+
+    Connects as the `scryer_setup` role which has BYPASSRLS attribute.
+    Use ONLY for setup/teardown that genuinely needs to write across
+    workspaces (squatter vs redeemer slug collision; cross-user IDOR
+    fixtures). Assertion paths must run under real RLS via `session`
+    + `workspace_context()`.
+
+    Per Neon docs: BYPASSRLS is grantable on Free tier — `neondb_owner`
+    inherits it from `neon_superuser` and can `ALTER ROLE x BYPASSRLS`."""
+    eng = create_async_engine(_privileged_url(), echo=False)
     yield eng
     await eng.dispose()
 
