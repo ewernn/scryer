@@ -122,6 +122,9 @@ class Suite(Base, TimestampMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     slug: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -134,6 +137,9 @@ class SuiteTask(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     suite_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("suites.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     task_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False
@@ -148,6 +154,9 @@ class SuiteRun(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     suite_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("suites.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     triggered_by_kind: Mapped[ActorKind] = mapped_column(
         Enum(ActorKind, name="actor_kind", native_enum=False, length=32), nullable=False
@@ -164,6 +173,9 @@ class SuiteRunRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     suite_run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("suite_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
@@ -187,6 +199,9 @@ class Trigger(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     kind: Mapped[TriggerKind] = mapped_column(
@@ -279,6 +294,9 @@ class ResourceTag(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     tag_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)

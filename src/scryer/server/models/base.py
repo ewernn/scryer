@@ -47,10 +47,18 @@ class SoftDeleteMixin:
 class VersionedMixin:
     """Content-hashed, lineage-tracked resources (Dataset, Scorer, Agent, Tool,
     Prompt, Task). Tables using this must declare
-    (project_id, slug, version) UNIQUE in their __table_args__."""
+    (project_id, slug, version) UNIQUE in their __table_args__.
+
+    `workspace_id` is denormalized for RLS (see migration 99b59febc9c0). The
+    DB trigger `_trgfn_workspace_from_project` populates it BEFORE INSERT
+    from the parent project, so service code does not need to set it. Reads
+    can rely on it being populated."""
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     slug: Mapped[str] = mapped_column(String(128), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)

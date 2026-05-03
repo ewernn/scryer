@@ -48,6 +48,9 @@ class Comment(Base, TimestampMixin):
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     # Optional resource anchor (Comments can be project-level or resource-scoped)
     resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     resource_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
@@ -89,6 +92,9 @@ class CommentVersion(Base):
     comment_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("comments.id", ondelete="CASCADE"), nullable=False
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     structured: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -102,6 +108,9 @@ class Collection(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     slug: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -130,6 +139,9 @@ class CollectionMember(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     collection_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("collections.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     member_type: Mapped[str] = mapped_column(String(64), nullable=False)
     member_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)

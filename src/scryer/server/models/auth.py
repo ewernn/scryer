@@ -334,6 +334,13 @@ class ApiKey(Base, TimestampMixin):
         Uuid, ForeignKey("service_accounts.id", ondelete="RESTRICT"), nullable=True
     )
 
+    # Cat 4: nullable workspace_id (NULL = user-keyed, set = SA-keyed).
+    # Trigger _trgfn_workspace_from_service_account_nullable populates from
+    # the service account on INSERT; user-keyed rows must be NULL.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True
+    )
+
     # Display + verification
     key_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False)  # sha256 hex
@@ -384,6 +391,11 @@ class ApiKeyUsage(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     api_key_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("api_keys.id", ondelete="CASCADE"), nullable=False
+    )
+    # Cat 4: nullable workspace_id, inherited from parent api_key by trigger
+    # _trgfn_workspace_from_api_key_nullable on INSERT.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True
     )
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)

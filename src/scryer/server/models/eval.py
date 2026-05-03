@@ -76,6 +76,9 @@ class DatasetRecord(Base):
     dataset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     record_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inputs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     expected: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -139,6 +142,9 @@ class AgentTool(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     agent_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     tool_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("tools.id", ondelete="CASCADE"), nullable=False
@@ -278,6 +284,9 @@ class Result(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     record_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     score_value: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     score_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -311,6 +320,9 @@ class Trace(Base, TimestampMixin):
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
     record_id: Mapped[int] = mapped_column(Integer, nullable=False)
     storage: Mapped[TraceStorage] = mapped_column(
         Enum(TraceStorage, name="trace_storage", native_enum=False, length=16),
@@ -335,6 +347,9 @@ class TraceStep(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("traces.id", ondelete="CASCADE"), nullable=False
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
     )
     seq: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(32), nullable=False)

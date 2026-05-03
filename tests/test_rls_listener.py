@@ -26,12 +26,13 @@ async def test_listener_sets_guc_when_info_populated(engine: AsyncEngine) -> Non
 
 async def test_listener_skips_when_info_empty(engine: AsyncEngine) -> None:
     """No SET LOCAL when info is empty; current_setting returns empty string
-    (the `true` second-arg means 'missing returns empty, not error')."""
+    or None depending on PG version (the `true` second-arg means 'missing OK
+    — don't error'). Either is "unset"; both are falsy."""
     factory = build_session_factory(engine)
     async with factory() as s:
         result = await s.execute(text("SELECT current_setting('app.current_workspace_id', true)"))
         got = result.scalar_one()
-        assert got == ""
+        assert not got, f"expected falsy (unset), got {got!r}"
 
 
 async def test_guc_is_transaction_scoped(engine: AsyncEngine) -> None:
