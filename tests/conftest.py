@@ -270,10 +270,22 @@ async def client(engine: AsyncEngine, http_session: AsyncSession) -> AsyncIterat
 
 
 @asynccontextmanager
-async def workspace_context(sess: AsyncSession, workspace_id: uuid.UUID) -> AsyncIterator[None]:
-    """Set RLS workspace context for the next statement(s) in this session.
-    Equivalent to setting session.info["workspace_id"] then triggering the
-    RLS listener; this helper is convenient when you don't want to touch
-    session.info directly."""
+async def workspace_context(
+    sess: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> AsyncIterator[None]:
+    """Set RLS workspace + (optional) user context for the next statement(s).
+
+    Equivalent to setting `session.info["workspace_id"]` and (optionally)
+    `session.info["current_user_id"]`, then letting the RLS listener pick
+    them up at the next transaction's after_begin.
+
+    Pass `user_id=` when the test exercises queries against
+    workspace_members, project_members, or any other table whose policy
+    keys on `app.current_user_id`."""
     sess.info["workspace_id"] = workspace_id
+    if user_id is not None:
+        sess.info["current_user_id"] = user_id
     yield

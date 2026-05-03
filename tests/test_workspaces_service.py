@@ -28,7 +28,7 @@ async def test_create_workspace_happy_path(session: AsyncSession) -> None:
     ws = await create_workspace(session, slug=slug, name="My WS", owner_user_id=user.id)
     assert ws.slug == slug
     assert ws.owner_user_id == user.id
-    async with workspace_context(session, ws.id):
+    async with workspace_context(session, ws.id, user_id=user.id):
         found = await list_workspaces_for_user(session, user.id)
         assert any(w.id == ws.id for w in found)
 
@@ -88,11 +88,11 @@ async def test_list_workspaces_for_user(session: AsyncSession) -> None:
     a = await create_workspace(session, slug=s1, name="A", owner_user_id=user.id)
     b = await create_workspace(session, slug=s2, name="B", owner_user_id=user.id)
     c = await create_workspace(session, slug=s3, name="C", owner_user_id=other.id)
-    # Cross-tenant test: query both tenants' workspace lists. Each list_workspaces_for_user
-    # call needs a workspace context — wrap each scope independently.
-    async with workspace_context(session, a.id):
+    # Cross-tenant test: each block wraps with the appropriate user_id so the
+    # workspace_members policy lets that user see their own memberships.
+    async with workspace_context(session, a.id, user_id=user.id):
         found_ids = {w.id for w in await list_workspaces_for_user(session, user.id)}
         assert {a.id, b.id} <= found_ids
-    async with workspace_context(session, c.id):
+    async with workspace_context(session, c.id, user_id=other.id):
         other_ids = {w.id for w in await list_workspaces_for_user(session, other.id)}
         assert a.id not in other_ids

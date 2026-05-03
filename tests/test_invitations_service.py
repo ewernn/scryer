@@ -78,7 +78,10 @@ async def test_redeem_survives_personal_workspace_slug_collision(
     assert user.id is not None
     assert user.email == invitee_email
     # Personal workspace must have landed on suffix "-3" (first two were taken).
-    async with workspace_context(session, ws.id):
+    # Workspace itself isn't RLS-policied (it's the resolution root); query goes
+    # through without GUC. user_id is set for completeness in case anything
+    # downstream queries workspace_members.
+    async with workspace_context(session, ws.id, user_id=user.id):
         rows = list(
             (
                 await session.execute(select(Workspace).where(Workspace.owner_user_id == user.id))
@@ -123,7 +126,8 @@ async def test_redeem_invitation_creates_user_membership_personal_ws_default_pro
     assert user.email == new_email
     assert inv.used_by_user_id == user.id
 
-    async with workspace_context(session, ws.id):
+    # workspace_members policy keys on current_user_id — set it to the new user.
+    async with workspace_context(session, ws.id, user_id=user.id):
         members = await session.execute(
             select(WorkspaceMember).where(
                 WorkspaceMember.workspace_id == ws.id, WorkspaceMember.user_id == user.id
@@ -131,13 +135,13 @@ async def test_redeem_invitation_creates_user_membership_personal_ws_default_pro
         )
         assert members.scalar_one_or_none() is not None
 
-        # Cross-tenant: querying for the new user's personal workspace which
-        # has a different workspace_id. Once RLS lands this needs splitting
-        # or privileged engine. Wrapping in inviter ws context is a no-op now.
-        personal = await session.execute(
-            select(Workspace).where(Workspace.owner_user_id == user.id, Workspace.id != ws.id)
-        )
-        personal_ws = personal.scalar_one()
+    # Workspace itself isn't RLS-policied; this select runs without GUC gating.
+    personal = await session.execute(
+        select(Workspace).where(Workspace.owner_user_id == user.id, Workspace.id != ws.id)
+    )
+    personal_ws = personal.scalar_one()
+    # projects IS policied; switch the workspace GUC to the new personal workspace.
+    async with workspace_context(session, personal_ws.id, user_id=user.id):
         default_proj = await session.execute(
             select(Project).where(Project.workspace_id == personal_ws.id, Project.slug == "default")
         )

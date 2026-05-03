@@ -1,13 +1,24 @@
-.PHONY: install sync test test-migrations lint format check ci serve migrate revision
+.PHONY: install sync unhide-pth test test-migrations lint format check ci serve migrate revision
 
 UV ?= ~/.local/bin/uv
 
 install:
 	$(UV) pip install -e . --reinstall
+	$(MAKE) unhide-pth
 
 sync:
 	$(UV) sync --extra dev
 	$(UV) pip install -e . --reinstall-package scryer
+	$(MAKE) unhide-pth
+
+# iCloud Desktop sync flips the macOS UF_HIDDEN bit on freshly-written .pth
+# files. Python 3.14's site.addpackage skips hidden .pth files, so the
+# editable install becomes invisible after every `uv pip install -e .`.
+# Clear the flag (no-op on Linux/CI).
+unhide-pth:
+	@if [ -d .venv/lib/python3.14/site-packages ] && command -v chflags >/dev/null 2>&1; then \
+		chflags nohidden .venv/lib/python3.14/site-packages/*.pth 2>/dev/null || true; \
+	fi
 
 test:
 	$(UV) run pytest -v
