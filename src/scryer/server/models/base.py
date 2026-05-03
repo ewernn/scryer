@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, MetaData, String, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, MetaData, String, Uuid, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 NAMING_CONVENTION: dict[str, str] = {
@@ -22,17 +22,33 @@ class Base(DeclarativeBase):
 
 
 def utc_now() -> datetime:
+    """Application-side UTC clock. Used only for in-Python comparisons
+    (rate limit windows, retry deltas, etc.). DB columns now use
+    `server_default` / `server_onupdate` so created_at / updated_at /
+    archived_at are stamped by Postgres — eliminates clock skew between
+    web, cron, and executor processes that don't share an NTP source."""
     return datetime.now(UTC)
 
 
 class TimestampMixin:
-    """created_at / updated_at managed application-side (no DB triggers)."""
+    """created_at / updated_at stamped by Postgres via `now()`.
+
+    Pushed from convention (Python `datetime.now`) to database to remove
+    the multi-process clock-skew hazard. The Python defaults stay too as
+    a safety net for tests / scripts that bypass server insert defaults."""
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, nullable=False
+        DateTime(timezone=True),
+        default=utc_now,
+        server_default=text("now()"),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=text("now()"),
+        nullable=False,
     )
 
 
