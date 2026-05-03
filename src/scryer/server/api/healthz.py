@@ -41,7 +41,7 @@ async def healthz(request: Request) -> HealthResponse:
 # Expected migration head — bumping this manually in lock-step with new
 # alembic revisions catches "shipped code without running alembic upgrade".
 # Future improvement: read this from alembic config dynamically.
-EXPECTED_MIGRATION_HEAD = "c4f2e1b9a3d5"
+EXPECTED_MIGRATION_HEAD = "d8a719c5b2e7"
 
 # Stale-run threshold: a Run is "stuck" if it claims to be running but its
 # heartbeat is older than this. Matches the reaper's grace period.
@@ -90,7 +90,7 @@ async def healthz_deep(request: Request, response: Response) -> DeepHealthRespon
             db_check = CheckResult(ok=False, detail=f"db connect failed: {type(exc).__name__}")
 
     # Bail early on subsequent DB-dependent checks if connect failed.
-    if db_check.ok:
+    if db_check.ok and engine is not None:
         try:
             async with engine.connect() as conn:
                 head = await conn.execute(text("SELECT version_num FROM alembic_version"))

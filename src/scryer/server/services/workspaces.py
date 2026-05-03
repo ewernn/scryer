@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
@@ -56,24 +55,21 @@ async def create_workspace(
     name: str,
     owner_user_id: uuid.UUID,
 ) -> Workspace:
-    """Create a Workspace. Slug uniqueness checked across the slug history
-    table (no reclaim ever). Owner gets an automatic `owner` membership."""
+    """Create a Workspace. The workspace_slug_history trigger writes the
+    permanent slug record automatically (and rejects re-use of any retired
+    slug via the workspace_slugs PK). Owner gets an automatic `owner`
+    membership."""
     validate_slug(slug)
-
-    # Reject if slug ever existed (workspace_slugs is the historical record)
-    existing = await session.execute(select(WorkspaceSlug).where(WorkspaceSlug.slug == slug))
-    if existing.scalar_one_or_none():
-        raise ConflictError(f"Workspace slug {slug!r} is already in use or retired")
 
     ws = Workspace(slug=slug, name=name, owner_user_id=owner_user_id)
     session.add(ws)
     try:
         await session.flush()
     except SAIntegrityError as exc:
-        raise ConflictError(f"Workspace slug {slug!r} conflict") from exc
-
-    # Permanent slug record
-    session.add(WorkspaceSlug(slug=slug, workspace_id=ws.id))
+        # Two paths can throw IntegrityError here: the workspaces.slug
+        # UNIQUE constraint OR the workspace_slugs PK violation triggered
+        # by _trgfn_workspace_slug_history (slug previously retired).
+        raise ConflictError(f"Workspace slug {slug!r} is already in use or retired") from exc
 
     # Owner membership
     session.add(
@@ -112,29 +108,19 @@ async def get_workspace_by_slug(session: AsyncSession, slug: str) -> Workspace:
 async def rename_workspace_slug(
     session: AsyncSession, ws_id: uuid.UUID, new_slug: str
 ) -> Workspace:
-    """Rename a workspace's slug. Old slug → permanent redirect via history."""
+    """Rename a workspace's slug. The trigger handles the slug-history
+    bookkeeping: insert new history row, retire old. PK violation on
+    workspace_slugs raises if the new slug was ever in use → propagates
+    here as ConflictError."""
     validate_slug(new_slug)
     ws = await get_workspace(session, ws_id)
-
     if ws.slug == new_slug:
         return ws  # no-op
-
-    # New slug must not exist in history
-    existing = await session.execute(select(WorkspaceSlug).where(WorkspaceSlug.slug == new_slug))
-    if existing.scalar_one_or_none():
-        raise ConflictError(f"Slug {new_slug!r} is already in use or retired")
-
-    old_slug = ws.slug
     ws.slug = new_slug
-    session.add(WorkspaceSlug(slug=new_slug, workspace_id=ws.id))
-
-    old_row = (
-        await session.execute(select(WorkspaceSlug).where(WorkspaceSlug.slug == old_slug))
-    ).scalar_one_or_none()
-    if old_row is not None:
-        old_row.retired_at = datetime.now(UTC)
-
-    await session.flush()
+    try:
+        await session.flush()
+    except SAIntegrityError as exc:
+        raise ConflictError(f"Slug {new_slug!r} is already in use or retired") from exc
     return ws
 
 

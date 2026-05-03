@@ -26,7 +26,7 @@ test: unhide-pth
 # End-to-end Alembic migration test: docker postgres + upgrade + smoke + down + re-up.
 # Use this before landing any migration that adds triggers, RLS policies,
 # or anything else that Base.metadata.create_all (used by `make test`) skips.
-test-migrations:
+test-migrations: unhide-pth
 	UV=$(UV) bash scripts/test_migration.sh
 
 lint:

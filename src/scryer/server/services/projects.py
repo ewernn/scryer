@@ -6,6 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scryer.server.models.auth import (
@@ -28,23 +29,21 @@ async def create_project(
     owner_user_id: uuid.UUID,
     visibility: ProjectVisibility = ProjectVisibility.workspace,
 ) -> Project:
+    """Create a Project. The project_slug_history trigger writes the
+    permanent slug record and rejects re-use of any retired slug via the
+    project_slugs (workspace_id, slug) UNIQUE."""
     validate_slug(slug)
-
-    existing = await session.execute(
-        select(ProjectSlug).where(
-            ProjectSlug.workspace_id == workspace_id, ProjectSlug.slug == slug
-        )
-    )
-    if existing.scalar_one_or_none():
-        raise ConflictError(f"Project slug {slug!r} is already in use or retired in this workspace")
 
     proj = Project(workspace_id=workspace_id, slug=slug, name=name, visibility=visibility)
     session.add(proj)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        raise ConflictError(
+            f"Project slug {slug!r} is already in use or retired in this workspace"
+        ) from exc
 
-    session.add(ProjectSlug(workspace_id=workspace_id, slug=slug, project_id=proj.id))
     session.add(ProjectMember(project_id=proj.id, user_id=owner_user_id, role=ProjectRole.owner))
-
     await session.flush()
     return proj
 
