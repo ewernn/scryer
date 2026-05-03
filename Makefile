@@ -1,4 +1,4 @@
-.PHONY: install sync test lint format check ci serve migrate revision
+.PHONY: install sync test test-migrations lint format check ci serve migrate revision
 
 UV ?= ~/.local/bin/uv
 
@@ -11,6 +11,12 @@ sync:
 
 test:
 	$(UV) run pytest -v
+
+# End-to-end Alembic migration test: docker postgres + upgrade + smoke + down + re-up.
+# Use this before landing any migration that adds triggers, RLS policies,
+# or anything else that Base.metadata.create_all (used by `make test`) skips.
+test-migrations:
+	UV=$(UV) bash scripts/test_migration.sh
 
 lint:
 	$(UV) run ruff check .

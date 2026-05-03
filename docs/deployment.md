@@ -67,19 +67,21 @@ git push origin main   # triggers deploy
 ## Make targets
 
 ```
-make sync         # uv sync --extra dev + reinstall editable scryer
-make migrate      # alembic upgrade head
-make serve        # uvicorn --reload on 127.0.0.1:8000
-make test         # pytest -v (skips R2 tests if creds unset)
-make check        # ruff + mypy
-make format       # ruff format + ruff check --fix
-make ci           # check + test (the gate before commit)
+make sync             # uv sync --extra dev + reinstall editable scryer
+make migrate          # alembic upgrade head
+make serve            # uvicorn --reload on 127.0.0.1:8000
+make test             # pytest -v (skips R2 tests if creds unset)
+make test-migrations  # docker postgres + alembic up/down/up + smoke insert+select
+make check            # ruff + mypy
+make format           # ruff format + ruff check --fix
+make ci               # check + test (the gate before commit)
 ```
 
 ## Migrations
 
 ```bash
-make migrate      # apply all pending
+make migrate         # apply all pending
+make test-migrations # full pipeline: docker postgres → upgrade → smoke → downgrade → re-up
 ~/.local/bin/uv run alembic revision --autogenerate -m "msg"   # author new
 ~/.local/bin/uv run alembic downgrade -1                       # roll back one
 ```
@@ -87,6 +89,15 @@ make migrate      # apply all pending
 The Procfile runs `alembic upgrade head` before booting uvicorn, so production
 deploys auto-apply migrations. Online migrations should still be reviewed for
 locking; large-table ALTERs go behind the planned maintenance-mode flag.
+
+`make test-migrations` is the gate for any migration that adds triggers,
+RLS policies, CHECK constraints, or anything else that
+`Base.metadata.create_all` (used by `make test`) skips. Spins up an
+isolated Postgres in Docker (no Neon involved), runs the full Alembic
+chain forward, runs a tiny ORM round-trip, then runs the chain backward
+to verify every migration is reversible, then re-applies. Catches
+asyncpg multi-statement issues, missing downgrade implementations, and
+ORM/schema drift the moment they're introduced.
 
 ## Cron endpoints
 
