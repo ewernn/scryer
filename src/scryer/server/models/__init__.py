@@ -54,6 +54,7 @@ from scryer.server.models.eval import (  # noqa: F401
     Trace,
     TraceStep,
 )
+from scryer.server.models.idempotency import IdempotencyKey  # noqa: F401
 
 __all__ = [
     "ApiKey",

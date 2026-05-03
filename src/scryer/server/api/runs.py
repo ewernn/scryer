@@ -6,7 +6,7 @@ import uuid as _uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,10 @@ from scryer.server.db import get_session
 from scryer.server.models.eval import Task
 from scryer.server.services.access import assert_project_access, require_workspace_from_path
 from scryer.server.services.errors import NotFoundError
+from scryer.server.services.idempotency import (
+    capture_idempotency_response,
+    check_idempotency,
+)
 from scryer.server.services.runs import (
     cancel_run,
     execute_run,
@@ -79,12 +83,15 @@ def _run_to_out(r: Any) -> RunOut:
     response_model=RunOut,
     operation_id="runs.start",
     summary="Queue a Run for a Task; v0 executes synchronously inline",
+    dependencies=[Depends(check_idempotency)],
 )
 async def start(
+    request: Request,
     workspace_slug: str,
     body: RunStartRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    background_tasks: BackgroundTasks,
 ) -> RunOut:
     task_uuid = _uuid.UUID(body.task_id)
     task = await session.get(Task, task_uuid)
@@ -102,7 +109,15 @@ async def start(
     if body.execute_now:
         run = await execute_run(session, run_id=run.id)
     await session.commit()
-    return _run_to_out(run)
+    out = _run_to_out(run)
+    capture_idempotency_response(
+        background_tasks,
+        request,
+        getattr(request.app.state, "session_factory", None),
+        status_code=200,
+        body=out.model_dump(mode="json"),
+    )
+    return out
 
 
 @router.get(

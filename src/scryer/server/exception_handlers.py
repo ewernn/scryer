@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi_problem_details import ProblemResponse
 
 from scryer.server.services.errors import (
@@ -22,6 +23,7 @@ from scryer.server.services.errors import (
     ScryerError,
     ValidationError,
 )
+from scryer.server.services.idempotency import CachedResponseError
 
 _BASE_URI = "https://scryer.io/errors"
 
@@ -72,6 +74,15 @@ async def scryer_error_handler(request: Request, exc: Exception) -> ProblemRespo
         instance=request.url.path,
         **extras,
     )
+
+
+async def cached_idempotency_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return the cached response body verbatim. Set when a prior request
+    with the same Idempotency-Key already completed; the body is whatever
+    that handler originally returned (after Pydantic serialization)."""
+    assert isinstance(exc, CachedResponseError)
+    headers = {"Idempotent-Replay": "true"}
+    return JSONResponse(status_code=exc.status_code, content=exc.body, headers=headers)
 
 
 async def request_validation_handler(request: Request, exc: Exception) -> ProblemResponse:

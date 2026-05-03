@@ -41,7 +41,7 @@ async def healthz(request: Request) -> HealthResponse:
 # Expected migration head — bumping this manually in lock-step with new
 # alembic revisions catches "shipped code without running alembic upgrade".
 # Future improvement: read this from alembic config dynamically.
-EXPECTED_MIGRATION_HEAD = "f3c5d8e0a712"
+EXPECTED_MIGRATION_HEAD = "a1b2c3d4e5f6"
 
 # Stale-run threshold: a Run is "stuck" if it claims to be running but its
 # heartbeat is older than this. Matches the reaper's grace period.

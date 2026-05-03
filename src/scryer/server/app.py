@@ -36,6 +36,7 @@ from scryer.server.api.webhooks import router as webhooks_router
 from scryer.server.api.workspaces import router as workspaces_router
 from scryer.server.db import build_engine, build_session_factory
 from scryer.server.exception_handlers import (
+    cached_idempotency_handler,
     request_validation_handler,
     scryer_error_handler,
 )
@@ -86,8 +87,11 @@ def create_app() -> FastAPI:
     app.add_middleware(ApiVersionHeadersMiddleware)
     app.add_middleware(CorrelationIdMiddleware, header_name="X-Request-ID")
     app.add_middleware(BodySizeLimitMiddleware)
+    from scryer.server.services.idempotency import CachedResponseError as _CRE
+
     app.add_exception_handler(ScryerError, scryer_error_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
+    app.add_exception_handler(_CRE, cached_idempotency_handler)
 
     api_v1 = APIRouter(prefix="/api/v1")
     api_v1.include_router(healthz_router)
